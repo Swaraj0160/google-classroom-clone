@@ -3,87 +3,92 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { showToast } from "@/lib/toast";
-import type {
-  SubmissionWithStudent,
-  SubmissionCounts,
-  AssignmentSummary,
-} from "@/types/submission";
+import { compareByRollNumber } from "@/lib/format";
+import type { SubmissionStudent, SubmissionWithFiles } from "@/types/submission";
+
+export interface RosterEntry {
+  student: SubmissionStudent;
+  submission: SubmissionWithFiles | null;
+}
+
+export interface RosterCounts {
+  enrolled: number;
+  turnedIn: number;
+  missing: number;
+}
 
 interface UseAssignmentSubmissionsResult {
-  assignment: AssignmentSummary | null;
-  submissions: SubmissionWithStudent[];
-  counts: SubmissionCounts;
+  roster: RosterEntry[];
+  counts: RosterCounts;
   loading: boolean;
   refresh: () => Promise<void>;
 }
 
+const TURNED_IN_STATUSES = new Set(["submitted", "late", "graded"]);
+
 export function useAssignmentSubmissions(
-  assignmentId: string
+  assignmentId: string,
+  courseId: string
 ): UseAssignmentSubmissionsResult {
-  const [assignment, setAssignment] =
-    useState<AssignmentSummary | null>(null);
-
-  const [submissions, setSubmissions] = useState<
-    SubmissionWithStudent[]
-  >([]);
-
+  const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
 
+    // enrollments and submissions are independent (both only need the ids we
+    // already have), so fetch concurrently.
     const [
-      { data: assignmentData, error: assignmentError },
+      { data: enrollmentRows, error: enrollError },
       { data: submissionsData, error: submissionsError },
     ] = await Promise.all([
-      supabase
-        .from("assignments")
-        .select("id, course_id, title, due_date, total_marks")
-        .eq("id", assignmentId)
-        .single(),
-
+      supabase.from("enrollments").select("student_id").eq("course_id", courseId),
       supabase
         .from("submissions")
-        .select(`
-          *,
-          files:submission_files(*),
-          student:profiles!submissions_student_id_fkey(
-            id,
-            full_name,
-            email,
-            roll_number
-          )
-        `)
-        .eq("assignment_id", assignmentId)
-        .order("created_at"),
+        .select("*, files:submission_files(*)")
+        .eq("assignment_id", assignmentId),
     ]);
 
-    if (assignmentError) {
-      showToast.error("Failed to load assignment.");
-    } else {
-      setAssignment(assignmentData as AssignmentSummary);
+    if (enrollError) showToast.error("Failed to load enrolled students.");
+    if (submissionsError) showToast.error("Failed to load submissions.");
+
+    const studentIds = [...new Set((enrollmentRows ?? []).map((e) => e.student_id))];
+
+    let profiles: SubmissionStudent[] = [];
+    if (studentIds.length > 0) {
+      const { data: profileRows, error: profilesError } = await supabase
+        .from("profiles")
+        .select("id, full_name, email, roll_number")
+        .in("id", studentIds);
+
+      if (profilesError) {
+        showToast.error("Failed to load student profiles.");
+      } else {
+        profiles = (profileRows ?? []) as SubmissionStudent[];
+      }
+
+      if (profiles.length < studentIds.length) {
+        console.warn(
+          "[useAssignmentSubmissions] enrolled student_id(s) with no resolvable profile row",
+          studentIds.filter((id) => !profiles.some((p) => p.id === id))
+        );
+      }
     }
 
-    const missingStudent = (submissionsData ?? []).filter((s: any) => !s.student);
-    if (missingStudent.length > 0) {
-      // submission rows exist with a student_id but the embedded profile came
-      // back null — typically an RLS policy blocking cross-user profile reads.
-      console.warn(
-        "[useAssignmentSubmissions] student profile not resolved for submissions",
-        missingStudent.map((s: any) => s.student_id)
-      );
-    }
+    const submissionByStudent = new Map(
+      (submissionsData ?? []).map((s) => [s.student_id as string, s as SubmissionWithFiles])
+    );
 
-    if (submissionsError) {
-      showToast.error("Failed to load submissions.");
-    } else {
-      setSubmissions(
-        (submissionsData ?? []) as SubmissionWithStudent[]
-      );
-    }
+    const nextRoster: RosterEntry[] = profiles
+      .map((student) => ({
+        student,
+        submission: submissionByStudent.get(student.id) ?? null,
+      }))
+      .sort((a, b) => compareByRollNumber(a.student, b.student));
 
+    setRoster(nextRoster);
     setLoading(false);
-  }, [assignmentId]);
+  }, [assignmentId, courseId]);
 
   useEffect(() => {
     void fetchAll();
@@ -120,41 +125,19 @@ export function useAssignmentSubmissions(
     };
   }, [assignmentId, fetchAll]);
 
-  const counts = useMemo<SubmissionCounts>(() => {
-    const result: SubmissionCounts = {
-      total: submissions.length,
-      pending: 0,
-      submitted: 0,
-      late: 0,
-      graded: 0,
+  const counts = useMemo<RosterCounts>(() => {
+    const turnedIn = roster.filter(
+      (r) => r.submission && TURNED_IN_STATUSES.has(r.submission.status)
+    ).length;
+    return {
+      enrolled: roster.length,
+      turnedIn,
+      missing: roster.length - turnedIn,
     };
-
-    submissions.forEach((submission) => {
-      switch (submission.status) {
-        case "pending":
-          result.pending++;
-          break;
-
-        case "submitted":
-          result.submitted++;
-          break;
-
-        case "late":
-          result.late++;
-          break;
-
-        case "graded":
-          result.graded++;
-          break;
-      }
-    });
-
-    return result;
-  }, [submissions]);
+  }, [roster]);
 
   return {
-    assignment,
-    submissions,
+    roster,
     counts,
     loading,
     refresh: fetchAll,

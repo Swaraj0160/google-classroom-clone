@@ -5,10 +5,7 @@ import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { showToast } from "@/lib/toast";
 import { StudentSubmissionPanel } from "@/components/StudentSubmissionPanel";
-import { FacultySubmissionsList } from "@/components/FacultySubmissionsList";
-import { GradingPanel } from "@/components/GradingPanel";
-import { useAssignmentSubmissions } from "@/hooks/useAssignmentSubmissions";
-import type { SubmissionWithStudent } from "@/types/submission";
+import { AssignmentSubmissionOverview } from "@/components/AssignmentSubmissionOverview";
 import { Calendar, ClipboardList, Loader2, Paperclip } from "lucide-react";
 
 interface AssignmentDetail {
@@ -47,10 +44,6 @@ export default function AssignmentDetailsPage() {
   const [attachments, setAttachments] = useState<AssignmentAttachment[]>([]);
   const [assignmentLoading, setAssignmentLoading] = useState(true);
 
-  const [selectedSubmission, setSelectedSubmission] = useState<SubmissionWithStudent | null>(
-    null
-  );
-
   useEffect(() => {
     async function loadUserAndRole() {
       const {
@@ -67,7 +60,7 @@ export default function AssignmentDetailsPage() {
         .from("profiles")
         .select("role")
         .eq("id", uid)
-        .single();
+        .maybeSingle();
 
       if (error) {
         showToast.error("Failed to determine user role.");
@@ -90,7 +83,7 @@ export default function AssignmentDetailsPage() {
           "id, course_id, topic_id, title, description, instructions, due_date, total_marks, status, type, created_at, updated_at"
         )
         .eq("id", params.assignmentId)
-        .single();
+        .maybeSingle();
 
       if (error) {
         showToast.error("Failed to load assignment.");
@@ -216,26 +209,11 @@ export default function AssignmentDetailsPage() {
       )}
 
       {role === "faculty" && userId && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_1.2fr]">
-          <FacultySubmissionsList
-            assignmentId={params.assignmentId}
-            selectedSubmissionId={selectedSubmission?.id}
-            onSelect={setSelectedSubmission}
-          />
-
-          {selectedSubmission ? (
-            <GradingPanel
-              submission={selectedSubmission}
-              maxPoints={assignment.total_marks}
-              facultyId={userId}
-              onGraded={() => setSelectedSubmission(null)}
-            />
-          ) : (
-            <div className="flex items-center justify-center rounded-xl border border-dashed border-gray-200 py-16 text-sm text-gray-400 dark:border-gray-800 dark:text-gray-500">
-              Select a student to view and grade their submission.
-            </div>
-          )}
-        </div>
+        <AssignmentSubmissionOverview
+          assignmentId={params.assignmentId}
+          courseId={params.id}
+          totalMarks={assignment.total_marks}
+        />
       )}
 
       {!role && (
