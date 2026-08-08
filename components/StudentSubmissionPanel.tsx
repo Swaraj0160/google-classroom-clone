@@ -83,7 +83,7 @@ export function StudentSubmissionPanel({
             </div>
 
             <div className="text-lg font-bold text-green-700 dark:text-green-400">
-              {submission.grade ?? "-"}
+              {submission.marks ?? "-"}
               {assignment?.total_marks
                 ? ` / ${assignment.total_marks}`
                 : ""}

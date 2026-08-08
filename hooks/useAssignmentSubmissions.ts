@@ -50,7 +50,8 @@ export function useAssignmentSubmissions(
           student:profiles!submissions_student_id_fkey(
             id,
             full_name,
-            email
+            email,
+            roll_number
           )
         `)
         .eq("assignment_id", assignmentId)
@@ -61,6 +62,16 @@ export function useAssignmentSubmissions(
       showToast.error("Failed to load assignment.");
     } else {
       setAssignment(assignmentData as AssignmentSummary);
+    }
+
+    const missingStudent = (submissionsData ?? []).filter((s: any) => !s.student);
+    if (missingStudent.length > 0) {
+      // submission rows exist with a student_id but the embedded profile came
+      // back null — typically an RLS policy blocking cross-user profile reads.
+      console.warn(
+        "[useAssignmentSubmissions] student profile not resolved for submissions",
+        missingStudent.map((s: any) => s.student_id)
+      );
     }
 
     if (submissionsError) {

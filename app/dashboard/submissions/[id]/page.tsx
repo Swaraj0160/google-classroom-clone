@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { getSignedFileUrl } from "@/lib/storage";
-import { getSubmissionFileUrl } from "@/lib/submission-storage";
-import { FileText, Download, CheckCircle2, Clock, AlertCircle, FileCheck, Loader2 } from "lucide-react";
+import { CheckCircle2, Clock, AlertCircle, FileCheck, Loader2 } from "lucide-react";
+import { SubmissionFileList } from "@/components/SubmissionFileList";
+import { AttachmentPreview } from "@/components/classwork/AttachmentPreview";
+import type { SubmissionFile } from "@/types/submission";
+import type { AssignmentAttachment } from "@/types/classwork";
 
 interface AssignmentRow {
   id: string;
@@ -29,21 +31,9 @@ interface SubmissionRow {
 
 interface StudentRow {
   id: string;
-  full_name: string;
+  full_name: string | null;
   email: string;
-}
-
-interface SubmissionFileRow {
-  id: string;
-  file_name: string;
-  file_path: string;
-}
-
-interface AttachmentRow {
-  id: string;
-  file_name: string;
-  file_path: string | null;
-  url: string | null;
+  roll_number: string | null;
 }
 
 export default function SubmissionReviewPage() {
@@ -58,8 +48,8 @@ export default function SubmissionReviewPage() {
   const [submission, setSubmission] = useState<SubmissionRow | null>(null);
   const [assignment, setAssignment] = useState<AssignmentRow | null>(null);
   const [student, setStudent] = useState<StudentRow | null>(null);
-  const [submissionFiles, setSubmissionFiles] = useState<SubmissionFileRow[]>([]);
-  const [assignmentAttachments, setAssignmentAttachments] = useState<AttachmentRow[]>([]);
+  const [submissionFiles, setSubmissionFiles] = useState<SubmissionFile[]>([]);
+  const [assignmentAttachments, setAssignmentAttachments] = useState<AssignmentAttachment[]>([]);
 
   const [marksInput, setMarksInput] = useState<string>("");
   const [feedbackInput, setFeedbackInput] = useState<string>("");
@@ -74,7 +64,7 @@ export default function SubmissionReviewPage() {
         .from("submissions")
         .select("id, assignment_id, student_id, status, marks, feedback, submitted_at")
         .eq("id", submissionId)
-        .single();
+        .maybeSingle();
 
       if (submissionError || !submissionData) {
         setError("Submission not found.");
@@ -90,32 +80,42 @@ export default function SubmissionReviewPage() {
         .from("assignments")
         .select("id, course_id, title, description, instructions, due_date, total_marks")
         .eq("id", submissionData.assignment_id)
-        .single();
+        .maybeSingle();
 
       if (assignmentData) setAssignment(assignmentData);
 
-      const { data: studentData } = await supabase
-        .from("users")
-        .select("id, full_name, email")
+      const { data: studentData, error: studentError } = await supabase
+        .from("profiles")
+        .select("id, full_name, email, roll_number")
         .eq("id", submissionData.student_id)
-        .single();
+        .maybeSingle();
+
+      if (!studentData) {
+        // submissionData.student_id is valid but no profile row came back —
+        // typically an RLS policy blocking cross-user profile reads, not
+        // missing data.
+        console.warn("[SubmissionReview] profile not returned for student_id", {
+          student_id: submissionData.student_id,
+          studentError,
+        });
+      }
 
       if (studentData) setStudent(studentData);
 
       const { data: filesData } = await supabase
         .from("submission_files")
-        .select("id, file_name, file_path")
+        .select("id, submission_id, file_name, file_path, file_type, file_size")
         .eq("submission_id", submissionData.id);
 
-      setSubmissionFiles(filesData ?? []);
+      setSubmissionFiles((filesData ?? []) as SubmissionFile[]);
 
       if (assignmentData) {
         const { data: attachmentsData } = await supabase
           .from("assignment_attachments")
-          .select("id, file_name, file_path, url")
+          .select("id, assignment_id, kind, file_name, file_path, file_type, file_size, url, created_at")
           .eq("assignment_id", assignmentData.id);
 
-        setAssignmentAttachments(attachmentsData ?? []);
+        setAssignmentAttachments((attachmentsData ?? []) as AssignmentAttachment[]);
       }
 
       setLoading(false);
@@ -165,7 +165,7 @@ export default function SubmissionReviewPage() {
       })
       .eq("id", submission.id)
       .select("id, assignment_id, student_id, status, marks, feedback, submitted_at")
-      .single();
+      .maybeSingle();
 
     if (updateError || !data) {
       setError("Failed to save changes.");
@@ -221,7 +221,8 @@ export default function SubmissionReviewPage() {
           {assignment?.title ?? "Assignment"}
         </h1>
         <p className="mt-1 text-sm text-ink-soft dark:text-gray-400">
-          Reviewing submission from {student?.full_name ?? "Unknown Student"}
+          Reviewing submission from {student?.full_name || student?.email || "Unknown Student"}
+          {student?.roll_number ? ` (${student.roll_number})` : ""}
         </p>
       </div>
 
@@ -252,26 +253,7 @@ export default function SubmissionReviewPage() {
             ) : (
               <div className="space-y-2">
                 {assignmentAttachments.map((f) => (
-  <button
-    key={f.id}
-    type="button"
-    onClick={async () => {
-      try {
-        const href = f.url ?? (f.file_path ? await getSignedFileUrl(f.file_path) : null);
-        if (!href) throw new Error("File unavailable");
-        window.open(href, "_blank", "noopener,noreferrer");
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to open file.");
-      }
-    }}
-    className="flex w-full items-center justify-between rounded-xl border border-black/10 px-4 py-3 text-left text-sm transition-colors hover:bg-surface-alt dark:border-white/10 dark:hover:bg-white/5"
-  >
-                    <span className="flex items-center gap-2 truncate text-ink dark:text-white">
-                      <FileText size={15} className="shrink-0 text-ink-faint" />
-                      <span className="truncate">{f.file_name}</span>
-                    </span>
-                    <Download size={15} className="shrink-0 text-ink-faint" />
-                  </button>
+                  <AttachmentPreview key={f.id} attachment={f} />
                 ))}
               </div>
             )}
@@ -281,34 +263,7 @@ export default function SubmissionReviewPage() {
             <h3 className="mb-3 text-sm font-semibold text-ink dark:text-white">
               Submitted Files
             </h3>
-            {submissionFiles.length === 0 ? (
-              <p className="text-sm text-ink-faint">No files submitted.</p>
-            ) : (
-              <div className="space-y-2">
-                {submissionFiles.map((f) => (
-  <button
-    key={f.id}
-    type="button"
-    onClick={async () => {
-      try {
-        const href = await getSubmissionFileUrl(f.file_path);
-        window.open(href, "_blank", "noopener,noreferrer");
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to open file.");
-      }
-    }}
-    className="flex w-full items-center justify-between rounded-xl border border-black/10 px-4 py-3 text-left text-sm transition-colors hover:bg-surface-alt dark:border-white/10 dark:hover:bg-white/5"
-  >
-                    
-                    <span className="flex items-center gap-2 truncate text-ink dark:text-white">
-                      <FileText size={15} className="shrink-0 text-ink-faint" />
-                      <span className="truncate">{f.file_name}</span>
-                    </span>
-                    <Download size={15} className="shrink-0 text-ink-faint" />
-                  </button>
-                ))}
-              </div>
-            )}
+            <SubmissionFileList files={submissionFiles} />
           </div>
         </div>
 
@@ -321,7 +276,8 @@ export default function SubmissionReviewPage() {
               <div className="flex items-center justify-between">
                 <span className="text-ink-faint">Student</span>
                 <span className="font-medium text-ink dark:text-white">
-                  {student?.full_name ?? "Unknown"}
+                  {student?.full_name || student?.email || "Unknown"}
+                  {student?.roll_number ? ` · ${student.roll_number}` : ""}
                 </span>
               </div>
               <div className="flex items-center justify-between">

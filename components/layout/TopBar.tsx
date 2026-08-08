@@ -1,9 +1,15 @@
 "use client";
 
 import { Bell, Menu, Search, ChevronDown, Sun, Moon } from "lucide-react";
-import Image from "next/image";
 import { useState } from "react";
-import { faculty } from "@/lib/data";
+import { useProfile } from "@/hooks/useProfile";
+
+function getInitials(name: string | null | undefined, email: string | undefined): string {
+  const source = (name && name.trim()) || email || "?";
+  const parts = source.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
 export default function TopBar({
   collapsed,
@@ -18,6 +24,9 @@ export default function TopBar({
 }) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const { profile } = useProfile();
+  const displayName = profile?.full_name || profile?.email || "";
+  const nameParts = displayName.split(" ").filter(Boolean);
 
   return (
     <header
@@ -102,15 +111,11 @@ export default function TopBar({
             }}
             className="flex items-center gap-2 rounded-full py-1 pl-1 pr-2 transition-colors hover:bg-surface-alt dark:hover:bg-white/10"
           >
-            <Image
-              src={faculty.avatar}
-              alt={faculty.name}
-              width={34}
-              height={34}
-              className="rounded-full ring-2 ring-white dark:ring-surface-darkAlt"
-            />
+            <span className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-brand-blue/10 text-xs font-semibold text-brand-blue ring-2 ring-white dark:ring-surface-darkAlt">
+              {getInitials(profile?.full_name, profile?.email)}
+            </span>
             <span className="hidden text-sm font-medium text-ink dark:text-white md:block">
-              {faculty.name.split(" ")[0]} {faculty.name.split(" ")[2] ?? ""}
+              {nameParts[0] ?? ""} {nameParts.length > 1 ? nameParts[nameParts.length - 1] : ""}
             </span>
             <ChevronDown size={15} className="hidden text-ink-faint md:block" />
           </button>
@@ -118,15 +123,11 @@ export default function TopBar({
           {profileOpen && (
             <div className="absolute right-0 mt-2 w-64 animate-fadeInUp overflow-hidden rounded-2xl border border-black/5 bg-white shadow-elevated dark:border-white/10 dark:bg-surface-darkAlt">
               <div className="flex flex-col items-center gap-2 border-b border-black/5 px-4 py-5 dark:border-white/10">
-                <Image
-                  src={faculty.avatar}
-                  alt={faculty.name}
-                  width={56}
-                  height={56}
-                  className="rounded-full"
-                />
-                <p className="text-sm font-semibold text-ink dark:text-white">{faculty.name}</p>
-                <p className="text-xs text-ink-faint">{faculty.email}</p>
+                <span className="flex h-14 w-14 items-center justify-center rounded-full bg-brand-blue/10 text-lg font-semibold text-brand-blue">
+                  {getInitials(profile?.full_name, profile?.email)}
+                </span>
+                <p className="text-sm font-semibold text-ink dark:text-white">{displayName || "—"}</p>
+                <p className="text-xs text-ink-faint">{profile?.email}</p>
               </div>
               <div className="p-2">
                 <button className="w-full rounded-xl px-3 py-2 text-left text-sm text-ink-soft transition-colors hover:bg-surface-alt dark:text-gray-300 dark:hover:bg-white/5">

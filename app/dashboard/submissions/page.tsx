@@ -7,7 +7,9 @@ import { supabase } from "@/lib/supabase";
 interface SubmissionRow {
   id: string;
   studentName: string;
+  rollNumber: string | null;
   assignmentTitle: string;
+  courseTitle: string;
   status: string;
   score: number | null;
   submittedAt: string | null;
@@ -75,9 +77,15 @@ export default function SubmissionsPage() {
         return;
       }
 
+      const { data: courseRows } = await supabase
+        .from("courses")
+        .select("id, title")
+        .in("id", courseIds);
+      const courseTitleById = new Map((courseRows ?? []).map((c) => [c.id, c.title]));
+
       const { data: assignments } = await supabase
         .from("assignments")
-        .select("id, title, total_marks")
+        .select("id, title, total_marks, course_id")
         .in("course_id", courseIds);
 
       const assignmentList = assignments ?? [];
@@ -100,17 +108,17 @@ export default function SubmissionsPage() {
       const submissionRows = submissionsData ?? [];
       const studentIds = [...new Set(submissionRows.map((s) => s.student_id))];
 
-      let users: { id: string; full_name: string }[] = [];
+      let profileRows: { id: string; full_name: string | null; email: string; roll_number: string | null }[] = [];
       if (studentIds.length > 0) {
-        const { data: usersData } = await supabase
-          .from("users")
-          .select("id, full_name")
+        const { data: profilesData } = await supabase
+          .from("profiles")
+          .select("id, full_name, email, roll_number")
           .in("id", studentIds);
-        users = usersData ?? [];
+        profileRows = profilesData ?? [];
       }
 
       const rows: SubmissionRow[] = submissionRows.map((s) => {
-        const userRow = users.find((u) => u.id === s.student_id);
+        const studentRow = profileRows.find((u) => u.id === s.student_id);
         const assignment = assignmentById.get(s.assignment_id);
         const total = assignment?.total_marks ?? 0;
         const score =
@@ -120,8 +128,10 @@ export default function SubmissionsPage() {
 
         return {
           id: s.id,
-          studentName: userRow?.full_name ?? "Unknown Student",
+          studentName: studentRow?.full_name || studentRow?.email || "Unknown Student",
+          rollNumber: studentRow?.roll_number ?? null,
           assignmentTitle: assignment?.title ?? "Untitled Assignment",
+          courseTitle: assignment ? courseTitleById.get(assignment.course_id) ?? "" : "",
           status: s.status,
           score,
           submittedAt: s.submitted_at,
@@ -163,11 +173,17 @@ export default function SubmissionsPage() {
                 {getInitials(s.studentName)}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-ink dark:text-white">
+                <p className="flex items-center gap-2 text-sm font-semibold text-ink dark:text-white">
                   {s.studentName}
+                  {s.rollNumber && (
+                    <span className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-medium text-ink-faint dark:bg-white/5">
+                      {s.rollNumber}
+                    </span>
+                  )}
                 </p>
                 <p className="truncate text-xs text-ink-faint">
-                  {s.assignmentTitle} · {timeAgo(s.submittedAt)}
+                  {s.assignmentTitle}
+                  {s.courseTitle ? ` · ${s.courseTitle}` : ""} · {timeAgo(s.submittedAt)}
                 </p>
               </div>
 

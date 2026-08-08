@@ -24,3 +24,24 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+/**
+ * Natural sort by roll number (so "2" sorts before "10"), with students
+ * lacking a roll number pushed to the end and sorted by name as a fallback.
+ */
+export function compareByRollNumber<
+  T extends { roll_number?: string | null; full_name?: string | null; name?: string | null }
+>(a: T, b: T): number {
+  const rollA = a.roll_number?.trim() || null;
+  const rollB = b.roll_number?.trim() || null;
+
+  if (rollA && rollB) {
+    return rollA.localeCompare(rollB, undefined, { numeric: true, sensitivity: "base" });
+  }
+  if (rollA) return -1;
+  if (rollB) return 1;
+
+  const nameA = a.full_name ?? a.name ?? "";
+  const nameB = b.full_name ?? b.name ?? "";
+  return nameA.localeCompare(nameB);
+}

@@ -67,10 +67,12 @@ export default function StudentClassPage({
         "id,faculty_id,title,subject,division,semester"
       )
       .eq("id", id)
-      .single();
+      .maybeSingle();
 
     if (error || !data) {
+      if (error) console.warn("[StudentClassPage] course fetch failed", error);
       setMissing(true);
+      setLoading(false);
       return;
     }
 

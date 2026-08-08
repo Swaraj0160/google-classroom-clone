@@ -13,6 +13,7 @@ import {
 
 import { supabase } from "@/lib/supabase";
 import { StudentSubmissionPanel } from "@/components/StudentSubmissionPanel";
+import { AttachmentPreview } from "@/components/classwork/AttachmentPreview";
 import type { ClassworkItem } from "@/types/classwork";
 
 export default function StudentAssignmentPage({
@@ -183,33 +184,8 @@ export default function StudentAssignmentPage({
               <div className="grid gap-3">
 
                 {assignment.attachments!.map((file) => (
-
-  <button
-    key={file.id}
-    type="button"
-    onClick={async () => {
-      if (!file.file_path) {
-        console.error("File has no file_path");
-        return;
-      }
-
-      const { data, error } = await supabase.storage
-        .from("classroom-files")
-        .createSignedUrl(file.file_path, 3600);
-
-      if (error) {
-        console.error(error);
-        return;
-      }
-
-      window.open(data.signedUrl, "_blank");
-    }}
-    className="w-full rounded-xl border p-4 text-left transition hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
-  >
-    {file.file_name}
-  </button>
-
-))}
+                  <AttachmentPreview key={file.id} attachment={file} />
+                ))}
 
               </div>
 

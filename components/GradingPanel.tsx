@@ -30,7 +30,7 @@ export function GradingPanel({
     useGradeSubmission();
 
   const [grade, setGrade] = useState(
-    submission.grade?.toString() ?? ""
+    submission.marks?.toString() ?? ""
   );
 
   const [feedback, setFeedback] = useState(
@@ -38,7 +38,7 @@ export function GradingPanel({
   );
 
   useEffect(() => {
-    setGrade(submission.grade?.toString() ?? "");
+    setGrade(submission.marks?.toString() ?? "");
     setFeedback(submission.feedback ?? "");
   }, [submission]);
 
@@ -54,7 +54,7 @@ export function GradingPanel({
 
     const result = await gradeSubmission({
       submissionId: submission.id,
-      grade: value,
+      marks: value,
       feedback,
       facultyId,
     });
@@ -87,9 +87,6 @@ export function GradingPanel({
         <SubmissionStatusBadge
           status={submission.status}
         />
-        <p className="mt-2 text-xs text-gray-500">
-  Attempts: {submission.attempt_count}
-</p>
       </div>
 
       <div className="mt-6">

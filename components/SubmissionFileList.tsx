@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   Download,
+  Eye,
   Loader2,
   Trash2,
   FileText,
@@ -15,6 +16,7 @@ import {
 import type { SubmissionFile } from "@/types/submission";
 import {
   downloadSubmissionFile,
+  getSubmissionFileUrl,
   formatFileSize,
 } from "@/lib/submission-storage";
 import { showToast } from "@/lib/toast";
@@ -42,12 +44,23 @@ function getIcon(type: string | null) {
   return FileText;
 }
 
+function isPreviewable(type: string | null) {
+  if (!type) return false;
+  return (
+    type.includes("pdf") ||
+    type.includes("image") ||
+    type.includes("video") ||
+    type.startsWith("text/")
+  );
+}
+
 export function SubmissionFileList({
   files,
   removable = false,
   onRemove,
 }: SubmissionFileListProps) {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
 
   if (!files.length) {
     return (
@@ -55,6 +68,20 @@ export function SubmissionFileList({
         No files uploaded yet.
       </div>
     );
+  }
+
+  async function handlePreview(file: SubmissionFile) {
+    try {
+      setPreviewingId(file.id);
+      const url = await getSubmissionFileUrl(file.file_path);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      showToast.error(
+        err instanceof Error ? err.message : "Failed to open file."
+      );
+    } finally {
+      setPreviewingId(null);
+    }
   }
 
   async function handleDownload(file: SubmissionFile) {
@@ -80,6 +107,7 @@ export function SubmissionFileList({
     <div className="space-y-3">
       {files.map((file) => {
         const Icon = getIcon(file.file_type);
+        const previewable = isPreviewable(file.file_type);
 
         return (
           <div
@@ -103,6 +131,21 @@ export function SubmissionFileList({
             </div>
 
             <div className="flex items-center gap-2">
+              {previewable && (
+                <button
+                  onClick={() => handlePreview(file)}
+                  disabled={previewingId === file.id}
+                  className="rounded-full p-2 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50 dark:text-gray-400 dark:hover:bg-gray-700"
+                  title="Preview"
+                >
+                  {previewingId === file.id ? (
+                    <Loader2 size={17} className="animate-spin" />
+                  ) : (
+                    <Eye size={17} />
+                  )}
+                </button>
+              )}
+
               <button
                 onClick={() => handleDownload(file)}
                 disabled={downloadingId === file.id}

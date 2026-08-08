@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, Mail, MoreVertical, ShieldCheck } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { compareByRollNumber } from "@/lib/format";
 
 interface PeopleTabProps {
   courseId: string;
@@ -14,6 +15,9 @@ interface UserRow {
   email: string;
   full_name: string | null;
   role: string;
+  roll_number?: string | null;
+  division?: string | null;
+  semester?: string | null;
 }
 
 function getInitials(name: string | null | undefined, email: string): string {
@@ -49,6 +53,7 @@ export default function PeopleTab({ courseId, facultyId }: PeopleTabProps) {
   const [students, setStudents] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hiddenCount, setHiddenCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,48 +61,66 @@ export default function PeopleTab({ courseId, facultyId }: PeopleTabProps) {
     async function fetchPeople() {
       setLoading(true);
       setError(null);
+      setHiddenCount(0);
 
-      const [facultyRes, studentsRes] = await Promise.all([
+      const [facultyRes, enrollmentsRes] = await Promise.all([
         supabase
-  .from("profiles")
-  .select("id, email, full_name, role")
-  .eq("id", facultyId)
-  .single(),
+          .from("profiles")
+          .select("id, email, full_name, role")
+          .eq("id", facultyId)
+          .maybeSingle(),
         supabase
-  .from("enrollments")
-  .select(`
-    student_id,
-    student:profiles!student_id(
-      id,
-      email,
-      full_name,
-      role
-    )
-  `)
-  .eq("course_id", courseId),
+          .from("enrollments")
+          .select("student_id")
+          .eq("course_id", courseId),
       ]);
 
       if (cancelled) return;
 
-      if (facultyRes.error) {
-        setError(facultyRes.error.message);
+      // Faculty profile may legitimately be unavailable (e.g. RLS/deleted account) —
+      // never crash the tab over it.
+      setFaculty(facultyRes.error ? null : (facultyRes.data as UserRow | null));
+
+      if (enrollmentsRes.error) {
+        setError(enrollmentsRes.error.message);
         setLoading(false);
         return;
       }
 
-      if (studentsRes.error) {
-        setError(studentsRes.error.message);
+      const studentIds = [...new Set((enrollmentsRes.data ?? []).map((e) => e.student_id))];
+
+      if (studentIds.length === 0) {
+        setStudents([]);
         setLoading(false);
         return;
       }
 
-      setFaculty(facultyRes.data as UserRow);
+      const { data: profileRows, error: profilesError } = await supabase
+        .from("profiles")
+        .select("id, email, full_name, role, roll_number, division, semester")
+        .in("id", studentIds);
 
-      const studentRows = (studentsRes.data ?? [])
-        .map((row: any) => row.student as UserRow | null)
-        .filter((s: UserRow | null): s is UserRow => !!s);
+      if (cancelled) return;
 
-      setStudents(studentRows);
+      if (profilesError) {
+        setError(profilesError.message);
+        setLoading(false);
+        return;
+      }
+
+      const gap = studentIds.length - (profileRows?.length ?? 0);
+      if (gap > 0) {
+        // Enrollment rows exist but some profile rows didn't come back — this is
+        // the signature of an RLS policy blocking cross-user profile reads, not
+        // missing data.
+        console.warn(
+          "[PeopleTab] enrollments resolved more student_ids than profiles returned — likely blocked by profiles RLS policy.",
+          { studentIds, resolvedProfileIds: (profileRows ?? []).map((p) => p.id) }
+        );
+      }
+      setHiddenCount(gap);
+
+      setStudents(((profileRows ?? []) as UserRow[]).sort(compareByRollNumber));
       setLoading(false);
     }
 
@@ -136,6 +159,9 @@ export default function PeopleTab({ courseId, facultyId }: PeopleTabProps) {
           </h3>
           <span className="text-xs text-ink-faint">{faculty ? 1 : 0} person</span>
         </div>
+        {!faculty && (
+          <p className="text-sm text-ink-faint">Faculty information unavailable.</p>
+        )}
         {faculty && (
           <div className="flex items-center justify-between rounded-xl p-2 transition-colors hover:bg-surface-alt dark:hover:bg-white/5">
             <div className="flex items-center gap-3">
@@ -160,6 +186,13 @@ export default function PeopleTab({ courseId, facultyId }: PeopleTabProps) {
           </h3>
           <span className="text-xs text-ink-faint">{students.length} people</span>
         </div>
+        {hiddenCount > 0 && (
+          <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
+            {hiddenCount} enrolled student{hiddenCount === 1 ? "" : "s"} could not be displayed —
+            their profile is not readable by this account (likely a permissions/RLS
+            restriction on the profiles table, not missing data).
+          </p>
+        )}
         <div className="divide-y divide-black/5 dark:divide-white/10">
           {students.map((s) => (
             <div
@@ -169,12 +202,24 @@ export default function PeopleTab({ courseId, facultyId }: PeopleTabProps) {
               <div className="flex items-center gap-3">
                 <InitialsAvatar name={s.full_name} email={s.email} size={40} />
                 <div>
-                  <p className="text-sm font-medium text-ink dark:text-white">
+                  <p className="flex items-center gap-2 text-sm font-medium text-ink dark:text-white">
                     {s.full_name || s.email}
+                    {s.roll_number && (
+                      <span className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-medium text-ink-faint dark:bg-white/5">
+                        Roll {s.roll_number}
+                      </span>
+                    )}
                   </p>
                   <p className="flex items-center gap-1 text-xs text-ink-faint">
                     <Mail size={11} /> {s.email}
                   </p>
+                  {(s.division || s.semester) && (
+                    <p className="mt-0.5 text-[11px] text-ink-faint">
+                      {s.division ? `Div ${s.division}` : ""}
+                      {s.division && s.semester ? " · " : ""}
+                      {s.semester ? `Sem ${s.semester}` : ""}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-4">

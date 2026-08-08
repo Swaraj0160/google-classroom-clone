@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import StreamTab from "@/components/stream/StreamTab";
 import { ClassworkTab } from "@/components/classwork/ClassworkTab";
 import PeopleTab from "@/components/class/PeopleTab";
+import MarksTab from "@/components/class/MarksTab";
 import { showToast } from "@/lib/toast";
 
 type ClassTab = "Stream" | "Classwork" | "People" | "Marks";
@@ -175,18 +176,8 @@ export default function ClassPage({
         {activeTab === "People" && (
           <PeopleTab courseId={course.id} facultyId={course.faculty_id} />
         )}
-        {activeTab === "Marks" && <ComingSoon label="Marks" />}
+        {activeTab === "Marks" && <MarksTab courseId={course.id} courseName={course.title} />}
       </div>
-    </div>
-  );
-}
-
-function ComingSoon({ label }: { label: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-300 bg-white py-20 text-center dark:border-gray-700 dark:bg-gray-800">
-      <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
-        {label} is coming soon
-      </p>
     </div>
   );
 }

@@ -6,15 +6,19 @@ import {
   CheckCircle2,
   ClipboardList,
   Award,
+  TrendingUp,
+  Clock,
+  Target,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 interface GradeSubmission {
   id: string;
-  grade: number | null;
+  marks: number | null;
   feedback: string | null;
   status: string;
-  graded_at: string | null;
+  submitted_at: string | null;
+  updated_at: string;
 
   assignment: {
     id: string;
@@ -24,13 +28,13 @@ interface GradeSubmission {
 
     course: {
       title: string;
-    }[];
-  }[];
+    } | null;
+  } | null;
 }
 
 export default function StudentGradesPage() {
   const [loading, setLoading] = useState(true);
-  const [submissions, setSubmissions] = useState<GradeSubmission[]>([]);
+  const [allSubmissions, setAllSubmissions] = useState<GradeSubmission[]>([]);
 
   useEffect(() => {
     loadGrades();
@@ -52,10 +56,11 @@ export default function StudentGradesPage() {
       .from("submissions")
       .select(`
         id,
-        grade,
+        marks,
         feedback,
         status,
-        graded_at,
+        submitted_at,
+        updated_at,
         assignment:assignments(
           id,
           title,
@@ -67,14 +72,13 @@ export default function StudentGradesPage() {
         )
       `)
       .eq("student_id", user.id)
-      .eq("status", "graded")
-      .order("graded_at", { ascending: false });
+      .order("updated_at", { ascending: false });
 
     if (error) {
       console.error(error);
-      setSubmissions([]);
+      setAllSubmissions([]);
     } else {
-      setSubmissions((data as unknown as GradeSubmission[]) ?? []);
+      setAllSubmissions((data as unknown as GradeSubmission[]) ?? []);
     }
 
     setLoading(false);
@@ -83,138 +87,132 @@ export default function StudentGradesPage() {
   if (loading) {
     return (
       <div className="flex h-[60vh] items-center justify-center">
-        <Loader2
-          size={32}
-          className="animate-spin text-blue-600"
-        />
+        <Loader2 size={32} className="animate-spin text-blue-600" />
       </div>
     );
   }
 
+  const graded = allSubmissions.filter((s) => s.status === "graded" && s.marks !== null);
+
+  const percentages = graded
+    .map((s) => {
+      const total = s.assignment?.total_marks;
+      return total ? (Number(s.marks) / total) * 100 : null;
+    })
+    .filter((p): p is number => p !== null);
+
+  const average = percentages.length
+    ? Math.round(percentages.reduce((a, b) => a + b, 0) / percentages.length)
+    : null;
+  const highest = percentages.length ? Math.round(Math.max(...percentages)) : null;
+  const completedCount = graded.length;
+  const pendingCount = allSubmissions.filter((s) => s.status !== "graded").length;
+
   return (
     <div className="space-y-8">
-
       <div>
-        <h1 className="text-3xl font-bold">
-          Grades
-        </h1>
-
-        <p className="mt-2 text-gray-500">
-          View your graded assignments.
-        </p>
+        <h1 className="text-3xl font-bold">Grades</h1>
+        <p className="mt-2 text-gray-500">View your graded assignments.</p>
       </div>
 
-      {submissions.length === 0 ? (
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <div className="flex items-center gap-2 text-gray-500">
+            <TrendingUp size={16} />
+            <span className="text-xs font-medium">Average</span>
+          </div>
+          <p className="mt-2 text-2xl font-bold">{average !== null ? `${average}%` : "—"}</p>
+        </div>
+        <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <div className="flex items-center gap-2 text-gray-500">
+            <Target size={16} />
+            <span className="text-xs font-medium">Highest</span>
+          </div>
+          <p className="mt-2 text-2xl font-bold">{highest !== null ? `${highest}%` : "—"}</p>
+        </div>
+        <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <div className="flex items-center gap-2 text-gray-500">
+            <Clock size={16} />
+            <span className="text-xs font-medium">Pending</span>
+          </div>
+          <p className="mt-2 text-2xl font-bold">{pendingCount}</p>
+        </div>
+        <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <div className="flex items-center gap-2 text-gray-500">
+            <CheckCircle2 size={16} />
+            <span className="text-xs font-medium">Completed</span>
+          </div>
+          <p className="mt-2 text-2xl font-bold">{completedCount}</p>
+        </div>
+      </div>
+
+      {graded.length === 0 ? (
         <div className="rounded-2xl border bg-white py-24 text-center shadow-sm">
-
-          <Award
-            size={64}
-            className="mx-auto mb-5 text-gray-300"
-          />
-
-          <h2 className="text-xl font-semibold">
-            No Grades Yet
-          </h2>
-
-          <p className="mt-2 text-gray-500">
-            Your graded assignments will appear here.
-          </p>
-
+          <Award size={64} className="mx-auto mb-5 text-gray-300" />
+          <h2 className="text-xl font-semibold">No Grades Yet</h2>
+          <p className="mt-2 text-gray-500">Your graded assignments will appear here.</p>
         </div>
       ) : (
         <div className="space-y-5">
-
-          {submissions.map((submission) => {
-            const assignment = submission.assignment?.[0];
-            const course = assignment?.course?.[0];
+          {graded.map((submission) => {
+            const assignment = submission.assignment;
+            const course = assignment?.course;
+            const isLate =
+              !!submission.submitted_at &&
+              !!assignment?.due_date &&
+              new Date(submission.submitted_at) > new Date(assignment.due_date);
 
             return (
-              <div
-                key={submission.id}
-                className="rounded-2xl border bg-white p-6 shadow-sm"
-              >
+              <div key={submission.id} className="rounded-2xl border bg-white p-6 shadow-sm">
                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-
                   <div>
-
                     <div className="flex items-center gap-2">
-
-                      <ClipboardList
-                        size={18}
-                        className="text-blue-600"
-                      />
-
-                      <h2 className="text-lg font-semibold">
-                        {assignment?.title ?? "Assignment"}
-                      </h2>
-
+                      <ClipboardList size={18} className="text-blue-600" />
+                      <h2 className="text-lg font-semibold">{assignment?.title ?? "Assignment"}</h2>
                     </div>
 
-                    <p className="mt-2 text-sm text-gray-500">
-                      {course?.title ?? "-"}
-                    </p>
+                    <p className="mt-2 text-sm text-gray-500">{course?.title ?? "-"}</p>
 
-                    {assignment?.due_date && (
-                      <p className="mt-1 text-xs text-gray-400">
-                        Due{" "}
-                        {new Date(
-                          assignment.due_date
-                        ).toLocaleString()}
+                    {submission.submitted_at && (
+                      <p className="mt-1 flex items-center gap-2 text-xs text-gray-400">
+                        Submitted {new Date(submission.submitted_at).toLocaleString()}
+                        <span
+                          className={`rounded-full px-2 py-0.5 font-medium ${
+                            isLate ? "bg-red-50 text-red-600" : "bg-green-50 text-green-600"
+                          }`}
+                        >
+                          {isLate ? "Late" : "On Time"}
+                        </span>
                       </p>
                     )}
-
                   </div>
 
                   <div className="text-right">
-
                     <div className="flex items-center justify-end gap-2 text-green-600">
-
                       <CheckCircle2 size={18} />
-
-                      <span className="font-semibold">
-                        Graded
-                      </span>
-
+                      <span className="font-semibold">Graded</span>
                     </div>
 
                     <div className="mt-2 text-3xl font-bold">
-
-                      {submission.grade ?? "-"}
-
+                      {submission.marks ?? "-"}
                       {assignment?.total_marks != null && (
-                        <span className="text-lg text-gray-500">
-                          {" "}
-                          / {assignment.total_marks}
-                        </span>
+                        <span className="text-lg text-gray-500"> / {assignment.total_marks}</span>
                       )}
-
                     </div>
-
                   </div>
-
                 </div>
 
                 {submission.feedback && (
                   <div className="mt-6 rounded-xl bg-gray-50 p-4">
-
-                    <h3 className="mb-2 font-semibold">
-                      Faculty Feedback
-                    </h3>
-
-                    <p className="whitespace-pre-wrap text-gray-600">
-                      {submission.feedback}
-                    </p>
-
+                    <h3 className="mb-2 font-semibold">Faculty Remarks</h3>
+                    <p className="whitespace-pre-wrap text-gray-600">{submission.feedback}</p>
                   </div>
                 )}
-
               </div>
             );
           })}
-
         </div>
       )}
-
     </div>
   );
 }

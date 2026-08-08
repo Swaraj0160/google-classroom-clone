@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   Download,
+  Eye,
   File as FileIcon,
   FileArchive,
   FileImage,
@@ -23,6 +24,15 @@ function iconFor(fileType: string) {
   return FileIcon;
 }
 
+function isPreviewable(fileType: string) {
+  return (
+    fileType === "application/pdf" ||
+    fileType.startsWith("image/") ||
+    fileType.startsWith("video/") ||
+    fileType.startsWith("text/")
+  );
+}
+
 interface AttachmentChipProps {
   attachment: AnnouncementAttachment;
 }
@@ -30,34 +40,51 @@ interface AttachmentChipProps {
 export default function AttachmentChip({
   attachment,
 }: AttachmentChipProps) {
-  const [loading, setLoading] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   const Icon = iconFor(attachment.file_type);
+  const previewable = isPreviewable(attachment.file_type);
 
-  async function handleOpen() {
-    setLoading(true);
-
+  async function handlePreview() {
+    setPreviewing(true);
     try {
       const url = await getSignedFileUrl(attachment.file_path);
-
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (err) {
       showToast.error(
-        err instanceof Error
-          ? err.message
-          : "Could not open file"
+        err instanceof Error ? err.message : "Could not open file"
       );
     } finally {
-      setLoading(false);
+      setPreviewing(false);
+    }
+  }
+
+  async function handleDownload() {
+    setDownloading(true);
+    try {
+      const url = await getSignedFileUrl(attachment.file_path);
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = attachment.file_name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      showToast.error(
+        err instanceof Error ? err.message : "Could not download file"
+      );
+    } finally {
+      setDownloading(false);
     }
   }
 
   return (
-    <button
-      onClick={handleOpen}
-      disabled={loading}
-      className="flex items-center gap-2.5 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-left text-sm transition-colors hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700"
-    >
+    <div className="flex items-center gap-2.5 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-800">
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-900/30">
         <Icon size={16} />
       </span>
@@ -72,17 +99,35 @@ export default function AttachmentChip({
         </span>
       </span>
 
-      {loading ? (
-        <Loader2
-          size={15}
-          className="animate-spin text-gray-400"
-        />
-      ) : (
-        <Download
-          size={15}
-          className="text-gray-400"
-        />
-      )}
-    </button>
+      <span className="flex shrink-0 items-center gap-1">
+        {previewable && (
+          <button
+            onClick={handlePreview}
+            disabled={previewing}
+            title="Preview"
+            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-blue-600 disabled:opacity-60 dark:hover:bg-gray-700"
+          >
+            {previewing ? (
+              <Loader2 size={15} className="animate-spin" />
+            ) : (
+              <Eye size={15} />
+            )}
+          </button>
+        )}
+
+        <button
+          onClick={handleDownload}
+          disabled={downloading}
+          title="Download"
+          className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-blue-600 disabled:opacity-60 dark:hover:bg-gray-700"
+        >
+          {downloading ? (
+            <Loader2 size={15} className="animate-spin" />
+          ) : (
+            <Download size={15} />
+          )}
+        </button>
+      </span>
+    </div>
   );
 }

@@ -113,7 +113,7 @@ export default function AIInsightsTab() {
       const { data: submissionRows, error: submissionsError } = await supabase
         .from("submissions")
         .select(
-          "student_id, marks, assignment_id, student:users!student_id ( full_name, email )"
+          "student_id, marks, assignment_id, student:profiles!student_id ( full_name, email )"
         )
         .in("assignment_id", assignmentIds)
         .eq("status", "graded");

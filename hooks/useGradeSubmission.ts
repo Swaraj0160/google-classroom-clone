@@ -7,7 +7,7 @@ import type { Submission } from "@/types/submission";
 
 export interface GradeInput {
   submissionId: string;
-  grade: number | null;
+  marks: number | null;
   feedback: string;
   facultyId: string;
 }
@@ -25,16 +25,15 @@ export function useGradeSubmission(): UseGradeSubmissionResult {
   const gradeSubmission = useCallback(
     async ({
       submissionId,
-      grade,
+      marks,
       feedback,
-      facultyId,
     }: GradeInput): Promise<Submission | null> => {
-      if (grade === null || Number.isNaN(grade)) {
+      if (marks === null || Number.isNaN(marks)) {
         showToast.error("Please enter a valid grade.");
         return null;
       }
 
-      if (grade < 0) {
+      if (marks < 0) {
         showToast.error("Grade cannot be negative.");
         return null;
       }
@@ -45,10 +44,8 @@ export function useGradeSubmission(): UseGradeSubmissionResult {
         const { data, error } = await supabase
           .from("submissions")
           .update({
-            grade,
+            marks,
             feedback,
-            graded_by: facultyId,
-            graded_at: new Date().toISOString(),
             status: "graded",
           })
           .eq("id", submissionId)

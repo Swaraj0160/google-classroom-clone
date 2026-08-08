@@ -88,7 +88,7 @@ export default function StudentClassesPage() {
       .from("courses")
       .select("id")
       .eq("join_code", joinCode.trim())
-      .single();
+      .maybeSingle();
 
     if (!course) {
       showToast.error("Invalid join code");

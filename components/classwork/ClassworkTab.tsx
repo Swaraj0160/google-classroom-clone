@@ -168,33 +168,6 @@ export function ClassworkTab({ courseId, facultyId }: ClassworkTabProps) {
         />
       ) : (
         <div className="space-y-8">
-          {untopiced.length > 0 && (
-            <TopicSection
-              topic={null}
-              items={untopiced}
-              allTopics={topicsApi.topics}
-              isFaculty={isFaculty}
-              isFirst
-              isLast
-              onOpenItem={handleOpenItem}
-              onEditItem={handleEditItem}
-              onDeleteItem={handleDeleteItem}
-              onDuplicateItem={(item) => assignmentsApi.duplicateAssignment(item.id)}
-              onToggleStatus={(item) =>
-                assignmentsApi.setStatus(item.id, item.status === "published" ? "draft" : "published")
-              }
-              onMoveItemToTopic={(item, topicId) =>
-                item.type === "material"
-                  ? materialsApi.moveToTopic(item.id, topicId)
-                  : assignmentsApi.moveToTopic(item.id, topicId)
-              }
-              onRenameTopic={() => undefined}
-              onDeleteTopic={() => undefined}
-              onMoveTopicUp={() => undefined}
-              onMoveTopicDown={() => undefined}
-            />
-          )}
-
           {grouped.map((topic, index) => (
             <TopicSection
               key={topic.id}
@@ -222,6 +195,33 @@ export function ClassworkTab({ courseId, facultyId }: ClassworkTabProps) {
               onMoveTopicDown={() => topicsApi.moveTopic(topic.id, "down")}
             />
           ))}
+
+          {untopiced.length > 0 && (
+            <TopicSection
+              topic={null}
+              items={untopiced}
+              allTopics={topicsApi.topics}
+              isFaculty={isFaculty}
+              isFirst={grouped.length === 0}
+              isLast
+              onOpenItem={handleOpenItem}
+              onEditItem={handleEditItem}
+              onDeleteItem={handleDeleteItem}
+              onDuplicateItem={(item) => assignmentsApi.duplicateAssignment(item.id)}
+              onToggleStatus={(item) =>
+                assignmentsApi.setStatus(item.id, item.status === "published" ? "draft" : "published")
+              }
+              onMoveItemToTopic={(item, topicId) =>
+                item.type === "material"
+                  ? materialsApi.moveToTopic(item.id, topicId)
+                  : assignmentsApi.moveToTopic(item.id, topicId)
+              }
+              onRenameTopic={() => undefined}
+              onDeleteTopic={() => undefined}
+              onMoveTopicUp={() => undefined}
+              onMoveTopicDown={() => undefined}
+            />
+          )}
         </div>
       )}
 

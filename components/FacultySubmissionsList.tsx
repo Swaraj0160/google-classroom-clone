@@ -10,6 +10,7 @@ import {
 
 import { useAssignmentSubmissions } from "@/hooks/useAssignmentSubmissions";
 import { SubmissionStatusBadge } from "@/components/SubmissionStatusBadge";
+import { compareByRollNumber } from "@/lib/format";
 import type { SubmissionWithStudent } from "@/types/submission";
 
 interface FacultySubmissionsListProps {
@@ -31,15 +32,17 @@ export function FacultySubmissionsList({
   const filtered = useMemo(() => {
     const value = search.toLowerCase();
 
-    return submissions.filter((s) => {
-      const name = s.student?.full_name ?? "";
-      const email = s.student?.email ?? "";
+    return submissions
+      .filter((s) => {
+        const name = s.student?.full_name ?? "";
+        const email = s.student?.email ?? "";
 
-      return (
-        name.toLowerCase().includes(value) ||
-        email.toLowerCase().includes(value)
-      );
-    });
+        return (
+          name.toLowerCase().includes(value) ||
+          email.toLowerCase().includes(value)
+        );
+      })
+      .sort((a, b) => compareByRollNumber(a.student ?? {}, b.student ?? {}));
   }, [search, submissions]);
 
   if (loading) {
@@ -103,9 +106,14 @@ export function FacultySubmissionsList({
                 </div>
 
                 <div className="min-w-0">
-                  <p className="truncate font-medium text-gray-900 dark:text-white">
+                  <p className="flex items-center gap-2 truncate font-medium text-gray-900 dark:text-white">
                     {submission.student?.full_name ??
                       submission.student?.email}
+                    {submission.student?.roll_number && (
+                      <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                        {submission.student.roll_number}
+                      </span>
+                    )}
                   </p>
 
                   {submission.files.length > 0 && (
@@ -122,7 +130,7 @@ export function FacultySubmissionsList({
                 {submission.status === "graded" && (
                   <div className="flex items-center gap-2 font-semibold text-green-600">
                     <CheckCircle2 size={16} />
-                    {submission.grade ?? "-"}
+                    {submission.marks ?? "-"}
                   </div>
                 )}
 

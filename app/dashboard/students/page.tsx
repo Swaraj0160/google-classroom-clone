@@ -8,6 +8,9 @@ interface StudentRow {
   id: string;
   full_name: string;
   email: string;
+  roll_number: string | null;
+  division: string | null;
+  semester: string | null;
   joinedAt: string | null;
   coursesCount: number;
   submissionsCount: number;
@@ -34,9 +37,8 @@ function getAvatarColor(name: string) {
   const sum = name.split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
   return avatarPalette[sum % avatarPalette.length];
 }
+
 export default function StudentsPage() {
-
-
   const [loading, setLoading] = useState(true);
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [search, setSearch] = useState("");
@@ -77,10 +79,14 @@ export default function StudentsPage() {
         return;
       }
 
-      const { data: users } = await supabase
-        .from("users")
-        .select("id, full_name, email")
+      const { data: profiles, error: profilesError } = await supabase
+        .from("profiles")
+        .select("id, full_name, email, roll_number, division, semester")
         .in("id", studentIds);
+
+      if (profilesError) {
+        console.error("[students] failed to load profiles:", profilesError.message);
+      }
 
       const { data: assignments } = await supabase
         .from("assignments")
@@ -108,7 +114,12 @@ export default function StudentsPage() {
       }
 
       const rows: StudentRow[] = studentIds.map((studentId) => {
-        const userRow = (users ?? []).find((u) => u.id === studentId);
+        const profileRow = (profiles ?? []).find((p) => p.id === studentId);
+        if (!profileRow) {
+          console.warn(
+            `[students] enrollment references student_id ${studentId} with no matching profiles row.`
+          );
+        }
         const studentEnrollments = enrollmentRows.filter((e) => e.student_id === studentId);
         const coursesCount = new Set(studentEnrollments.map((e) => e.course_id)).size;
         const earliestJoined = studentEnrollments.reduce<string | null>((earliest, e) => {
@@ -131,8 +142,11 @@ export default function StudentsPage() {
 
         return {
           id: studentId,
-          full_name: userRow?.full_name ?? "Unknown Student",
-          email: userRow?.email ?? "",
+          full_name: profileRow?.full_name ?? "Unknown Student",
+          email: profileRow?.email ?? "",
+          roll_number: profileRow?.roll_number ?? null,
+          division: profileRow?.division ?? null,
+          semester: profileRow?.semester ?? null,
           joinedAt: earliestJoined,
           coursesCount,
           submissionsCount: studentSubmissions.length,
@@ -140,7 +154,15 @@ export default function StudentsPage() {
         };
       });
 
-      rows.sort((a, b) => a.full_name.localeCompare(b.full_name));
+      rows.sort((a, b) => {
+        if (a.roll_number && b.roll_number) {
+          return a.roll_number.localeCompare(b.roll_number, undefined, { numeric: true });
+        }
+        if (a.roll_number) return -1;
+        if (b.roll_number) return 1;
+        return a.full_name.localeCompare(b.full_name);
+      });
+
       setStudents(rows);
       setLoading(false);
     };
@@ -152,7 +174,10 @@ export default function StudentsPage() {
     if (!search.trim()) return students;
     const q = search.trim().toLowerCase();
     return students.filter(
-      (s) => s.full_name.toLowerCase().includes(q) || s.email.toLowerCase().includes(q)
+      (s) =>
+        s.full_name.toLowerCase().includes(q) ||
+        s.email.toLowerCase().includes(q) ||
+        (s.roll_number ?? "").toLowerCase().includes(q)
     );
   }, [students, search]);
 
@@ -202,6 +227,25 @@ export default function StudentsPage() {
                   </p>
                 </div>
               </div>
+
+              <div className="mt-3 flex flex-wrap gap-1.5 text-[11px]">
+                {s.roll_number && (
+                  <span className="rounded-full bg-surface-alt px-2 py-0.5 font-medium text-ink-soft dark:bg-white/5 dark:text-gray-300">
+                    Roll: {s.roll_number}
+                  </span>
+                )}
+                {s.division && (
+                  <span className="rounded-full bg-surface-alt px-2 py-0.5 font-medium text-ink-soft dark:bg-white/5 dark:text-gray-300">
+                    Div {s.division}
+                  </span>
+                )}
+                {s.semester && (
+                  <span className="rounded-full bg-surface-alt px-2 py-0.5 font-medium text-ink-soft dark:bg-white/5 dark:text-gray-300">
+                    Sem {s.semester}
+                  </span>
+                )}
+              </div>
+
               <div className="mt-4 flex items-center justify-between text-xs">
                 <span className="text-ink-faint">
                   Joined:{" "}

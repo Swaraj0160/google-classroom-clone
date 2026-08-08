@@ -31,14 +31,9 @@ export interface Submission {
 
   submitted_at: string | null;
 
-  attempt_count: number;
-
-  grade: number | null;
+  marks: number | null;
 
   feedback: string | null;
-
-  graded_at: string | null;
-  graded_by: string | null;
 
   created_at: string;
   updated_at: string;
@@ -52,6 +47,7 @@ export interface SubmissionStudent {
   id: string;
   full_name: string | null;
   email: string;
+  roll_number?: string | null;
 }
 
 export interface SubmissionWithStudent extends SubmissionWithFiles {
@@ -90,7 +86,7 @@ export interface UpdateSubmissionInput {
 
 export interface GradeSubmissionInput {
   submissionId: string;
-  grade: number;
+  marks: number;
   feedback: string;
 }
 
