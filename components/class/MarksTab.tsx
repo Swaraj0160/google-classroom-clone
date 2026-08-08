@@ -110,10 +110,23 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
         return;
       }
 
-      const { data: profileRows, error: profilesError } = await supabase
-        .from("profiles")
-        .select("id, full_name, email, roll_number")
-        .in("id", studentIds);
+      const assignmentIds = assignmentList.map((a) => a.id);
+
+      // profiles (needs studentIds) and submissions (needs assignmentIds + studentIds)
+      // don't depend on each other — fetch concurrently.
+      const [{ data: profileRows, error: profilesError }, submissionsRes] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, full_name, email, roll_number")
+          .in("id", studentIds),
+        assignmentIds.length > 0
+          ? supabase
+              .from("submissions")
+              .select("id, assignment_id, student_id, marks, status, submitted_at, feedback")
+              .in("assignment_id", assignmentIds)
+              .in("student_id", studentIds)
+          : Promise.resolve({ data: [] as SubmissionRow[], error: null }),
+      ]);
 
       if (cancelled) return;
 
@@ -125,28 +138,13 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
 
       setStudents(((profileRows ?? []) as StudentRow[]).sort(compareByRollNumber));
 
-      const assignmentIds = assignmentList.map((a) => a.id);
-      if (assignmentIds.length === 0) {
-        setSubmissions([]);
+      if (submissionsRes.error) {
+        setError(submissionsRes.error.message);
         setLoading(false);
         return;
       }
 
-      const { data: submissionRows, error: submissionsError } = await supabase
-        .from("submissions")
-        .select("id, assignment_id, student_id, marks, status, submitted_at, feedback")
-        .in("assignment_id", assignmentIds)
-        .in("student_id", studentIds);
-
-      if (cancelled) return;
-
-      if (submissionsError) {
-        setError(submissionsError.message);
-        setLoading(false);
-        return;
-      }
-
-      setSubmissions((submissionRows ?? []) as SubmissionRow[]);
+      setSubmissions((submissionsRes.data ?? []) as SubmissionRow[]);
       setLoading(false);
     }
 

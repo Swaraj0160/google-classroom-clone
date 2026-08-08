@@ -74,8 +74,9 @@ export default function AnalyticsPage() {
   useEffect(() => {
     const load = async () => {
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        data: { session },
+      } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) {
         setLoading(false);
         return;

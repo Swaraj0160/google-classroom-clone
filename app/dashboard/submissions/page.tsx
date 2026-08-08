@@ -58,8 +58,9 @@ export default function SubmissionsPage() {
   useEffect(() => {
     const load = async () => {
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        data: { session },
+      } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) {
         setLoading(false);
         return;
@@ -67,7 +68,7 @@ export default function SubmissionsPage() {
 
       const { data: courses } = await supabase
         .from("courses")
-        .select("id")
+        .select("id, title")
         .eq("faculty_id", user.id);
 
       const courseIds = (courses ?? []).map((c) => c.id);
@@ -77,11 +78,7 @@ export default function SubmissionsPage() {
         return;
       }
 
-      const { data: courseRows } = await supabase
-        .from("courses")
-        .select("id, title")
-        .in("id", courseIds);
-      const courseTitleById = new Map((courseRows ?? []).map((c) => [c.id, c.title]));
+      const courseTitleById = new Map((courses ?? []).map((c) => [c.id, c.title]));
 
       const { data: assignments } = await supabase
         .from("assignments")

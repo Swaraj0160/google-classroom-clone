@@ -69,8 +69,9 @@ export function useAnnouncements(courseId: string): UseAnnouncementsResult {
       setSubmitting(true);
       try {
         const {
-          data: { user },
-        } = await supabase.auth.getUser();
+          data: { session },
+        } = await supabase.auth.getSession();
+        const user = session?.user;
         if (!user) throw new Error("You must be signed in to post.");
 
         const { data: announcement, error: insertError } = await supabase
@@ -159,8 +160,9 @@ export function useAnnouncements(courseId: string): UseAnnouncementsResult {
     async (announcementId: string, content: string) => {
       try {
         const {
-          data: { user },
-        } = await supabase.auth.getUser();
+          data: { session },
+        } = await supabase.auth.getSession();
+        const user = session?.user;
         if (!user) throw new Error("You must be signed in to comment.");
 
         const { error: insertError } = await supabase.from("announcement_comments").insert({

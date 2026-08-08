@@ -4,6 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Mail, Search } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
+interface SubmissionMini {
+  student_id: string;
+  assignment_id: string;
+  marks: number | null;
+  status: string;
+}
+
 interface StudentRow {
   id: string;
   full_name: string;
@@ -46,8 +53,9 @@ export default function StudentsPage() {
   useEffect(() => {
     const load = async () => {
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        data: { session },
+      } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) {
         setLoading(false);
         return;
@@ -65,13 +73,24 @@ export default function StudentsPage() {
         return;
       }
 
-      const { data: enrollments } = await supabase
-        .from("enrollments")
-        .select("student_id, course_id, joined_at")
-        .in("course_id", courseIds);
+      // enrollments and assignments both only depend on courseIds — fetch concurrently.
+      const [{ data: enrollments }, { data: assignments }] = await Promise.all([
+        supabase
+          .from("enrollments")
+          .select("student_id, course_id, joined_at")
+          .in("course_id", courseIds),
+        supabase
+          .from("assignments")
+          .select("id, course_id, total_marks")
+          .in("course_id", courseIds),
+      ]);
 
       const enrollmentRows = enrollments ?? [];
       const studentIds = [...new Set(enrollmentRows.map((e) => e.student_id))];
+
+      const assignmentList = assignments ?? [];
+      const assignmentIds = assignmentList.map((a) => a.id);
+      const assignmentById = new Map(assignmentList.map((a) => [a.id, a]));
 
       if (studentIds.length === 0) {
         setStudents([]);
@@ -79,39 +98,28 @@ export default function StudentsPage() {
         return;
       }
 
-      const { data: profiles, error: profilesError } = await supabase
-        .from("profiles")
-        .select("id, full_name, email, roll_number, division, semester")
-        .in("id", studentIds);
+      // profiles (needs studentIds) and submissions (needs assignmentIds + studentIds)
+      // don't depend on each other — fetch concurrently.
+      const [{ data: profiles, error: profilesError }, { data: submissionsData }] =
+        await Promise.all([
+          supabase
+            .from("profiles")
+            .select("id, full_name, email, roll_number, division, semester")
+            .in("id", studentIds),
+          assignmentIds.length > 0
+            ? supabase
+                .from("submissions")
+                .select("student_id, assignment_id, marks, status")
+                .in("assignment_id", assignmentIds)
+                .in("student_id", studentIds)
+            : Promise.resolve({ data: [] as SubmissionMini[], error: null }),
+        ]);
 
       if (profilesError) {
         console.error("[students] failed to load profiles:", profilesError.message);
       }
 
-      const { data: assignments } = await supabase
-        .from("assignments")
-        .select("id, course_id, total_marks")
-        .in("course_id", courseIds);
-
-      const assignmentList = assignments ?? [];
-      const assignmentIds = assignmentList.map((a) => a.id);
-      const assignmentById = new Map(assignmentList.map((a) => [a.id, a]));
-
-      let submissions: {
-        student_id: string;
-        assignment_id: string;
-        marks: number | null;
-        status: string;
-      }[] = [];
-
-      if (assignmentIds.length > 0) {
-        const { data: submissionsData } = await supabase
-          .from("submissions")
-          .select("student_id, assignment_id, marks, status")
-          .in("assignment_id", assignmentIds)
-          .in("student_id", studentIds);
-        submissions = submissionsData ?? [];
-      }
+      const submissions: SubmissionMini[] = submissionsData ?? [];
 
       const rows: StudentRow[] = studentIds.map((studentId) => {
         const profileRow = (profiles ?? []).find((p) => p.id === studentId);

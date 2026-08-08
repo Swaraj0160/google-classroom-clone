@@ -53,8 +53,10 @@ export default function AssignmentDetailsPage() {
 
   useEffect(() => {
     async function loadUserAndRole() {
-      const { data: authData } = await supabase.auth.getUser();
-      const uid = authData.user?.id;
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const uid = session?.user?.id;
       if (!uid) {
         setRoleLoading(false);
         return;

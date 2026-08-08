@@ -44,8 +44,9 @@ export default function StudentClassesPage() {
     setLoading(true);
 
     const {
-      data: { user },
-    } = await supabase.auth.getUser();
+      data: { session },
+    } = await supabase.auth.getSession();
+    const user = session?.user;
 
     if (!user) return;
 
@@ -79,8 +80,9 @@ export default function StudentClassesPage() {
     setJoining(true);
 
     const {
-      data: { user },
-    } = await supabase.auth.getUser();
+      data: { session },
+    } = await supabase.auth.getSession();
+    const user = session?.user;
 
     if (!user) return;
 

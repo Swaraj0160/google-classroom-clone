@@ -37,8 +37,9 @@ export default function CreateClassModal({
     setLoading(true);
 
     const {
-      data: { user },
-    } = await supabase.auth.getUser();
+      data: { session },
+    } = await supabase.auth.getSession();
+    const user = session?.user;
 
     if (!user) {
       showToast.error("User not logged in");
