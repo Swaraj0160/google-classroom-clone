@@ -2,12 +2,13 @@
 
 import { use, useEffect, useState } from "react";
 import { notFound } from "next/navigation";
-import { Copy, Loader2 } from "lucide-react";
+import { Copy, Loader2, Share2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import StreamTab from "@/components/stream/StreamTab";
 import { ClassworkTab } from "@/components/classwork/ClassworkTab";
 import PeopleTab from "@/components/class/PeopleTab";
 import MarksTab from "@/components/class/MarksTab";
+import ShareClassModal from "@/components/class/ShareClassModal";
 import { showToast } from "@/lib/toast";
 
 type ClassTab = "Stream" | "Classwork" | "People" | "Marks";
@@ -52,6 +53,7 @@ export default function ClassPage({
   const [loading, setLoading] = useState(true);
   const [missing, setMissing] = useState(false);
   const [activeTab, setActiveTab] = useState<ClassTab>("Stream");
+  const [shareOpen, setShareOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -133,15 +135,24 @@ export default function ClassPage({
           <span className="text-xs text-gray-500 dark:text-gray-400">
             Class details
           </span>
-          {course.join_code && (
+          <div className="flex flex-wrap items-center gap-2">
+            {course.join_code && (
+              <button
+                onClick={handleCopyJoinCode}
+                className="flex items-center gap-2 rounded-full bg-gray-100 px-3.5 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+              >
+                <Copy size={13} />
+                Join code: {course.join_code}
+              </button>
+            )}
             <button
-              onClick={handleCopyJoinCode}
-              className="flex items-center gap-2 rounded-full bg-gray-100 px-3.5 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+              onClick={() => setShareOpen(true)}
+              className="flex items-center gap-2 rounded-full bg-blue-600 px-3.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700"
             >
-              <Copy size={13} />
-              Join code: {course.join_code}
+              <Share2 size={13} />
+              Share Class
             </button>
-          )}
+          </div>
         </div>
 
         {/* Tabs */}
@@ -178,6 +189,14 @@ export default function ClassPage({
         )}
         {activeTab === "Marks" && <MarksTab courseId={course.id} courseName={course.title} />}
       </div>
+
+      <ShareClassModal
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        courseTitle={course.title}
+        subject={course.subject}
+        joinCode={course.join_code}
+      />
     </div>
   );
 }
