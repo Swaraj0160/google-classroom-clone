@@ -1,8 +1,34 @@
 "use client";
 
-import { Bell, Menu, Search, ChevronDown, Sun, Moon } from "lucide-react";
+import {
+  Bell,
+  Menu,
+  Search,
+  ChevronDown,
+  Sun,
+  Moon,
+  FileCheck,
+  ClipboardList,
+  Award,
+  Megaphone,
+  UserPlus,
+  Clock3,
+  CheckCheck,
+} from "lucide-react";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useProfile } from "@/hooks/useProfile";
+import { useNotifications, type NotificationType } from "@/hooks/useNotifications";
+import { formatRelativeTime } from "@/lib/format";
+
+const NOTIFICATION_ICONS: Record<NotificationType, typeof Bell> = {
+  submission: FileCheck,
+  assignment: ClipboardList,
+  grade: Award,
+  announcement: Megaphone,
+  enrollment: UserPlus,
+  deadline: Clock3,
+};
 
 function getInitials(name: string | null | undefined, email: string | undefined): string {
   const source = (name && name.trim()) || email || "?";
@@ -27,6 +53,14 @@ export default function TopBar({
   const { profile } = useProfile();
   const displayName = profile?.full_name || profile?.email || "";
   const nameParts = displayName.split(" ").filter(Boolean);
+  const router = useRouter();
+  const { notifications, unreadCount, isRead, markAsRead, markAllAsRead } = useNotifications();
+
+  function handleNotificationClick(id: string, href: string) {
+    markAsRead(id);
+    setNotifOpen(false);
+    router.push(href);
+  }
 
   return (
     <header
@@ -75,28 +109,65 @@ export default function TopBar({
             className="relative flex h-10 w-10 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-surface-alt dark:text-gray-300 dark:hover:bg-white/10"
           >
             <Bell size={19} />
-            <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-brand-red ring-2 ring-white dark:ring-surface-dark" />
+            {unreadCount > 0 && (
+              <span className="absolute right-2 top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-brand-red px-1 text-[10px] font-semibold text-white ring-2 ring-white dark:ring-surface-dark">
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </span>
+            )}
           </button>
 
           {notifOpen && (
-            <div className="absolute right-0 mt-2 w-80 animate-fadeInUp overflow-hidden rounded-2xl border border-black/5 bg-white shadow-elevated dark:border-white/10 dark:bg-surface-darkAlt">
-              <div className="border-b border-black/5 px-4 py-3 text-sm font-semibold dark:border-white/10">
-                Notifications
-              </div>
-              <div className="max-h-80 overflow-y-auto scrollbar-none">
-                {[
-                  { t: "42 new submissions in CS404", s: "2 min ago" },
-                  { t: "AI flagged 3 at-risk students in CS301", s: "1 hr ago" },
-                  { t: "Marks approved for CS210", s: "3 hr ago" },
-                ].map((n, i) => (
-                  <div
-                    key={i}
-                    className="cursor-pointer border-b border-black/5 px-4 py-3 text-sm transition-colors last:border-0 hover:bg-surface-alt dark:border-white/5 dark:hover:bg-white/5"
+            <div className="absolute right-0 mt-2 w-80 animate-fadeInUp overflow-hidden rounded-2xl border border-black/5 bg-white shadow-elevated dark:border-white/10 dark:bg-surface-darkAlt sm:w-96">
+              <div className="flex items-center justify-between border-b border-black/5 px-4 py-3 dark:border-white/10">
+                <span className="text-sm font-semibold text-ink dark:text-white">Notifications</span>
+                {notifications.length > 0 && unreadCount > 0 && (
+                  <button
+                    onClick={markAllAsRead}
+                    className="flex items-center gap-1 text-xs font-medium text-brand-blue hover:underline"
                   >
-                    <p className="font-medium text-ink dark:text-white">{n.t}</p>
-                    <p className="mt-0.5 text-xs text-ink-faint">{n.s}</p>
+                    <CheckCheck size={13} />
+                    Mark all as read
+                  </button>
+                )}
+              </div>
+              <div className="max-h-96 overflow-y-auto scrollbar-none">
+                {notifications.length === 0 ? (
+                  <div className="px-4 py-10 text-center text-sm text-ink-faint">
+                    You&apos;re all caught up.
                   </div>
-                ))}
+                ) : (
+                  notifications.map((n) => {
+                    const Icon = NOTIFICATION_ICONS[n.type];
+                    const unread = !isRead(n.id);
+                    return (
+                      <button
+                        key={n.id}
+                        onClick={() => handleNotificationClick(n.id, n.href)}
+                        className={`flex w-full items-start gap-3 border-b border-black/5 px-4 py-3 text-left text-sm transition-colors last:border-0 hover:bg-surface-alt dark:border-white/5 dark:hover:bg-white/5 ${
+                          unread ? "bg-blue-50/60 dark:bg-blue-500/5" : ""
+                        }`}
+                      >
+                        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-blue/10 text-brand-blue dark:bg-brand-blue/20">
+                          <Icon size={15} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-1.5">
+                            <span className="truncate font-medium text-ink dark:text-white">{n.title}</span>
+                            {unread && (
+                              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-blue" />
+                            )}
+                          </span>
+                          <span className="mt-0.5 block truncate text-xs text-ink-soft dark:text-gray-400">
+                            {n.message}
+                          </span>
+                          <span className="mt-0.5 block text-[11px] text-ink-faint">
+                            {formatRelativeTime(n.timestamp)}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
               </div>
             </div>
           )}

@@ -8,7 +8,8 @@ import {
   Trophy,
   AlertTriangle,
   Gauge,
-  Info,
+  ShieldAlert,
+  ClipboardCheck,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useProfile } from "@/hooks/useProfile";
@@ -24,6 +25,23 @@ interface GradedRow {
   assignment_title: string;
   topic_id: string | null;
   topic_title: string | null;
+}
+
+interface AttentionStudent {
+  id: string;
+  name: string | null;
+  email: string;
+  missing: number;
+  late: number;
+  average: number | null;
+  reasons: string[];
+}
+
+interface ClassHealth {
+  enrolledCount: number;
+  assignmentCount: number;
+  submissionRate: number | null;
+  missingCount: number;
 }
 
 function getInitials(name: string | null | undefined, email: string): string {
@@ -49,6 +67,13 @@ export default function AIInsightsTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [graded, setGraded] = useState<GradedRow[]>([]);
+  const [health, setHealth] = useState<ClassHealth>({
+    enrolledCount: 0,
+    assignmentCount: 0,
+    submissionRate: null,
+    missingCount: 0,
+  });
+  const [attentionList, setAttentionList] = useState<AttentionStudent[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,20 +98,24 @@ export default function AIInsightsTab() {
       const courseIds = (courses ?? []).map((c) => c.id);
       if (courseIds.length === 0) {
         setGraded([]);
+        setHealth({ enrolledCount: 0, assignmentCount: 0, submissionRate: null, missingCount: 0 });
+        setAttentionList([]);
         setLoading(false);
         return;
       }
 
-      const { data: topics } = await supabase
-        .from("topics")
-        .select("id, title")
-        .in("course_id", courseIds);
-      const topicTitleMap = new Map((topics ?? []).map((t) => [t.id, t.title]));
-
-      const { data: assignmentRows, error: assignmentsError } = await supabase
-        .from("assignments")
-        .select("id, title, total_marks, topic_id")
-        .in("course_id", courseIds);
+      // topics, assignments, and enrollments are all independent (only need courseIds).
+      const [{ data: topics }, { data: assignmentRows, error: assignmentsError }, { data: enrollmentRows }] =
+        await Promise.all([
+          supabase.from("topics").select("id, title").in("course_id", courseIds),
+          supabase
+            .from("assignments")
+            .select("id, title, total_marks, topic_id, due_date")
+            .in("course_id", courseIds)
+            .eq("status", "published")
+            .in("type", ["assignment", "quiz"]),
+          supabase.from("enrollments").select("student_id").in("course_id", courseIds),
+        ]);
 
       if (cancelled) return;
       if (assignmentsError) {
@@ -95,28 +124,34 @@ export default function AIInsightsTab() {
         return;
       }
 
+      const topicTitleMap = new Map((topics ?? []).map((t) => [t.id, t.title]));
       const assignmentList = assignmentRows ?? [];
       const assignmentIds = assignmentList.map((a) => a.id);
-      const assignmentInfo = new Map(
-        assignmentList.map((a) => [
-          a.id,
-          { title: a.title, total_marks: a.total_marks, topic_id: a.topic_id },
-        ])
-      );
+      const studentIds = [...new Set((enrollmentRows ?? []).map((e) => e.student_id))];
 
-      if (assignmentIds.length === 0) {
+      if (assignmentIds.length === 0 || studentIds.length === 0) {
         setGraded([]);
+        setHealth({
+          enrolledCount: studentIds.length,
+          assignmentCount: assignmentIds.length,
+          submissionRate: null,
+          missingCount: 0,
+        });
+        setAttentionList([]);
         setLoading(false);
         return;
       }
 
-      const { data: submissionRows, error: submissionsError } = await supabase
-        .from("submissions")
-        .select(
-          "student_id, marks, assignment_id, student:profiles!student_id ( full_name, email )"
-        )
-        .in("assignment_id", assignmentIds)
-        .eq("status", "graded");
+      // profiles and submissions are both independent (only need ids already known).
+      const [{ data: profileRows }, { data: submissionRows, error: submissionsError }] =
+        await Promise.all([
+          supabase.from("profiles").select("id, full_name, email").in("id", studentIds),
+          supabase
+            .from("submissions")
+            .select("student_id, assignment_id, marks, status, submitted_at")
+            .in("assignment_id", assignmentIds)
+            .in("student_id", studentIds),
+        ]);
 
       if (cancelled) return;
       if (submissionsError) {
@@ -125,24 +160,79 @@ export default function AIInsightsTab() {
         return;
       }
 
-      const rows: GradedRow[] = (submissionRows ?? [])
-        .map((s: any) => {
-          const info = assignmentInfo.get(s.assignment_id);
-          if (!info || !info.total_marks || s.marks === null) return null;
-          return {
-            student_id: s.student_id,
-            student_name: s.student?.full_name ?? null,
-            student_email: s.student?.email ?? "",
-            marks: s.marks,
-            total_marks: info.total_marks,
-            assignment_id: s.assignment_id,
-            assignment_title: info.title,
-            topic_id: info.topic_id,
-            topic_title: info.topic_id ? topicTitleMap.get(info.topic_id) ?? null : null,
-          };
-        })
-        .filter((r): r is GradedRow => r !== null);
+      const profileById = new Map((profileRows ?? []).map((p) => [p.id, p]));
+      const submissionByKey = new Map(
+        (submissionRows ?? []).map((s) => [`${s.student_id}:${s.assignment_id}`, s])
+      );
 
+      const rows: GradedRow[] = [];
+      let turnedInTotal = 0;
+      let missingTotal = 0;
+      const attention: AttentionStudent[] = [];
+
+      studentIds.forEach((studentId) => {
+        const p = profileById.get(studentId);
+        let missing = 0;
+        let late = 0;
+        const scores: number[] = [];
+
+        assignmentList.forEach((a) => {
+          const s = submissionByKey.get(`${studentId}:${a.id}`);
+          const turnedIn = !!s && s.status !== "pending" && !!s.submitted_at;
+          if (!turnedIn) {
+            missing++;
+            return;
+          }
+          turnedInTotal++;
+          if (a.due_date && new Date(s!.submitted_at as string) > new Date(a.due_date)) late++;
+
+          if (s!.status === "graded" && s!.marks !== null && a.total_marks) {
+            const pct = (Number(s!.marks) / a.total_marks) * 100;
+            scores.push(pct);
+            rows.push({
+              student_id: studentId,
+              student_name: p?.full_name ?? null,
+              student_email: p?.email ?? "",
+              marks: s!.marks,
+              total_marks: a.total_marks,
+              assignment_id: a.id,
+              assignment_title: a.title,
+              topic_id: a.topic_id,
+              topic_title: a.topic_id ? topicTitleMap.get(a.topic_id) ?? null : null,
+            });
+          }
+        });
+
+        missingTotal += missing;
+        const average = scores.length
+          ? Math.round(scores.reduce((sum, v) => sum + v, 0) / scores.length)
+          : null;
+
+        const reasons: string[] = [];
+        if (missing >= 2) reasons.push(`${missing} missing submissions`);
+        if (late >= 2) reasons.push(`${late} late submissions`);
+        if (average !== null && average < 50) reasons.push(`low average (${average}%)`);
+        if (reasons.length > 0) {
+          attention.push({
+            id: studentId,
+            name: p?.full_name ?? null,
+            email: p?.email ?? "",
+            missing,
+            late,
+            average,
+            reasons,
+          });
+        }
+      });
+
+      const possible = studentIds.length * assignmentList.length;
+      setHealth({
+        enrolledCount: studentIds.length,
+        assignmentCount: assignmentList.length,
+        submissionRate: possible > 0 ? Math.round((turnedInTotal / possible) * 100) : null,
+        missingCount: missingTotal,
+      });
+      setAttentionList(attention.sort((a, b) => b.missing - a.missing).slice(0, 6));
       setGraded(rows);
       setLoading(false);
     }
@@ -243,12 +333,12 @@ export default function AIInsightsTab() {
     );
   }
 
-  if (graded.length === 0) {
+  if (health.enrolledCount === 0 || health.assignmentCount === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-black/10 bg-white py-20 text-center dark:border-white/10 dark:bg-surface-darkAlt">
         <Sparkles size={28} className="mb-3 text-ink-faint" />
         <p className="text-sm font-medium text-ink-faint">
-          AI Insights will be available after sufficient assignment and submission data is collected.
+          AI Insights will be available once this class has enrolled students and published assignments.
         </p>
       </div>
     );
@@ -331,7 +421,9 @@ export default function AIInsightsTab() {
               }}
             />
             <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-2xl font-bold text-ink dark:text-white">{classAveragePct}%</span>
+              <span className="text-2xl font-bold text-ink dark:text-white">
+                {classAveragePct !== null ? `${classAveragePct}%` : "—"}
+              </span>
               <span className="text-[10px] text-ink-faint">across graded work</span>
             </div>
           </div>
@@ -359,20 +451,84 @@ export default function AIInsightsTab() {
               <p className="mt-2 text-2xl font-bold text-brand-green">{topPerformer.avg}%</p>
             </div>
           )}
+          {!topPerformer && (
+            <p className="py-6 text-center text-xs text-ink-faint">No graded work yet.</p>
+          )}
         </div>
 
-        {/* No attendance/participation data available */}
+        {/* Submission rate */}
         <div className="rounded-2xl border border-black/5 bg-white p-5 shadow-card dark:border-white/5 dark:bg-surface-darkAlt">
           <div className="mb-4 flex items-center gap-2">
-            <Info size={16} className="text-ink-faint" />
+            <ClipboardCheck size={16} className="text-brand-green" />
             <h3 className="text-sm font-semibold text-ink dark:text-white">
-              Student Risk Analysis
+              Class Health
             </h3>
           </div>
-          <p className="text-xs text-ink-faint">
-            Not available yet — this requires attendance or participation data, which isn&apos;t tracked in the current system.
-          </p>
+          <div className="space-y-2 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-ink-faint">Enrolled</span>
+              <span className="font-semibold text-ink dark:text-white">{health.enrolledCount}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-ink-faint">Assignments</span>
+              <span className="font-semibold text-ink dark:text-white">{health.assignmentCount}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-ink-faint">Submission rate</span>
+              <span className="font-semibold text-ink dark:text-white">
+                {health.submissionRate !== null ? `${health.submissionRate}%` : "—"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-ink-faint">Missing submissions</span>
+              <span className={`font-semibold ${health.missingCount > 0 ? "text-brand-red" : "text-ink dark:text-white"}`}>
+                {health.missingCount}
+              </span>
+            </div>
+          </div>
         </div>
+      </div>
+
+      {/* Students needing attention */}
+      <div className="rounded-2xl border border-black/5 bg-white p-5 shadow-card dark:border-white/5 dark:bg-surface-darkAlt">
+        <div className="mb-1 flex items-center gap-2">
+          <ShieldAlert size={16} className="text-brand-red" />
+          <h3 className="text-sm font-semibold text-ink dark:text-white">
+            Students Needing Attention
+          </h3>
+        </div>
+        <p className="mb-4 text-xs text-ink-faint">
+          Based on repeated missing/late submissions or a low graded average
+        </p>
+        {attentionList.length === 0 ? (
+          <p className="py-6 text-center text-xs text-ink-faint">
+            No students currently show a missing/late or low-score pattern.
+          </p>
+        ) : (
+          <div className="space-y-2.5">
+            {attentionList.map((s) => (
+              <div
+                key={s.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-black/5 px-3 py-2.5 dark:border-white/10"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-blue/10 text-xs font-semibold text-brand-blue">
+                    {getInitials(s.name, s.email)}
+                  </span>
+                  <div>
+                    <p className="text-sm font-medium text-ink dark:text-white">{s.name || s.email}</p>
+                    <p className="text-[11px] text-ink-faint">{s.reasons.join(" · ")}</p>
+                  </div>
+                </div>
+                {s.average !== null && (
+                  <span className="rounded-full bg-surface-alt px-2.5 py-1 text-xs font-semibold text-ink-soft dark:bg-white/5 dark:text-gray-300">
+                    Avg {s.average}%
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Charts row */}

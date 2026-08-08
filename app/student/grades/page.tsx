@@ -109,6 +109,27 @@ export default function StudentGradesPage() {
   const completedCount = graded.length;
   const pendingCount = allSubmissions.filter((s) => s.status !== "graded").length;
 
+  // Punctuality and trend are derived from real submission timestamps/scores only.
+  const submittedWork = allSubmissions.filter((s) => s.submitted_at);
+  const lateCount = submittedWork.filter(
+    (s) => s.assignment?.due_date && new Date(s.submitted_at as string) > new Date(s.assignment.due_date)
+  ).length;
+  const onTimeRate = submittedWork.length
+    ? Math.round(((submittedWork.length - lateCount) / submittedWork.length) * 100)
+    : null;
+
+  // `graded` is ordered most-recent-first (query order), so compare the newer
+  // half of graded scores against the older half.
+  let trend: "Improving" | "Declining" | "Steady" | null = null;
+  if (percentages.length >= 4) {
+    const half = Math.floor(percentages.length / 2);
+    const recentAvg = percentages.slice(0, half).reduce((a, b) => a + b, 0) / half;
+    const olderAvg =
+      percentages.slice(half).reduce((a, b) => a + b, 0) / (percentages.length - half);
+    const diff = recentAvg - olderAvg;
+    trend = diff > 3 ? "Improving" : diff < -3 ? "Declining" : "Steady";
+  }
+
   return (
     <div className="space-y-8">
       <div>
@@ -146,6 +167,32 @@ export default function StudentGradesPage() {
           <p className="mt-2 text-2xl font-bold">{completedCount}</p>
         </div>
       </div>
+
+      {(onTimeRate !== null || trend) && (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-2xl border bg-white px-5 py-3 text-sm text-gray-600 shadow-sm">
+          {onTimeRate !== null && (
+            <span>
+              On-time submissions: <strong className="text-gray-900">{onTimeRate}%</strong>
+            </span>
+          )}
+          {trend && (
+            <span>
+              Performance trend:{" "}
+              <strong
+                className={
+                  trend === "Improving"
+                    ? "text-green-600"
+                    : trend === "Declining"
+                    ? "text-red-600"
+                    : "text-gray-900"
+                }
+              >
+                {trend}
+              </strong>
+            </span>
+          )}
+        </div>
+      )}
 
       {graded.length === 0 ? (
         <div className="rounded-2xl border bg-white py-24 text-center shadow-sm">

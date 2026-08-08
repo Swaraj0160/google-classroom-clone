@@ -160,6 +160,30 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
     return map;
   }, [submissions]);
 
+  const studentStats = useMemo(() => {
+    const map = new Map<string, { submitted: number; missing: number; onTime: number; late: number }>();
+    students.forEach((student) => {
+      let submitted = 0;
+      let onTime = 0;
+      let late = 0;
+      assignments.forEach((a) => {
+        const s = submissionByKey.get(`${student.id}:${a.id}`);
+        const turnedIn = !!s && s.status !== "pending" && !!s.submitted_at;
+        if (!turnedIn) return;
+        submitted++;
+        if (submissionTiming(s, a) === "Late") late++;
+        else onTime++;
+      });
+      map.set(student.id, {
+        submitted,
+        missing: Math.max(0, assignments.length - submitted),
+        onTime,
+        late,
+      });
+    });
+    return map;
+  }, [students, assignments, submissionByKey]);
+
   const averages = useMemo(() => {
     const map = new Map<string, number | null>();
     students.forEach((student) => {
@@ -289,6 +313,10 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
                       <div className="text-[10px] font-normal normal-case text-ink-faint">/{a.total_marks}</div>
                     </th>
                   ))}
+                  <th className="whitespace-nowrap px-4 py-3 text-center">Submitted</th>
+                  <th className="whitespace-nowrap px-4 py-3 text-center">Missing</th>
+                  <th className="whitespace-nowrap px-4 py-3 text-center">On-time</th>
+                  <th className="whitespace-nowrap px-4 py-3 text-center">Late</th>
                   <th className="whitespace-nowrap px-4 py-3 text-center">Average</th>
                 </tr>
               </thead>
@@ -323,6 +351,30 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
                         </td>
                       );
                     })}
+                    <td className="px-4 py-3 text-center text-ink-soft dark:text-gray-400">
+                      {studentStats.get(student.id)?.submitted ?? 0}/{assignments.length}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {(studentStats.get(student.id)?.missing ?? 0) > 0 ? (
+                        <span className="font-medium text-brand-red">
+                          {studentStats.get(student.id)?.missing}
+                        </span>
+                      ) : (
+                        <span className="text-ink-soft dark:text-gray-400">0</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center text-ink-soft dark:text-gray-400">
+                      {studentStats.get(student.id)?.onTime ?? 0}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {(studentStats.get(student.id)?.late ?? 0) > 0 ? (
+                        <span className="font-medium text-amber-600 dark:text-amber-400">
+                          {studentStats.get(student.id)?.late}
+                        </span>
+                      ) : (
+                        <span className="text-ink-soft dark:text-gray-400">0</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-center">
                       {averages.get(student.id) !== null && averages.get(student.id) !== undefined ? (
                         <span className="font-semibold text-ink dark:text-white">

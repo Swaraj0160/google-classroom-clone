@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { UpcomingAssignments } from "@/components/UpcomingAssignments";
 
 interface Stats {
   classes: number;
@@ -128,6 +129,10 @@ export default function DashboardPage() {
             {stats.average}%
           </p>
         </div>
+      </div>
+
+      <div className="mt-8">
+        <UpcomingAssignments />
       </div>
     </div>
   );

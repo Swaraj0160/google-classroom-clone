@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { BookOpen, ClipboardCheck, Clock3, Bell } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { UpcomingAssignments } from "@/components/UpcomingAssignments";
 
 interface Stats {
   classes: number;
@@ -126,6 +127,8 @@ export default function StudentDashboard() {
         </div>
 
       </div>
+
+      <UpcomingAssignments />
 
       <div className="rounded-2xl border bg-white p-6 shadow-sm">
 
