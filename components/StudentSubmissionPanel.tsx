@@ -6,6 +6,7 @@ import { useStudentSubmission } from "@/hooks/useStudentSubmission";
 import { FileUploadZone } from "@/components/FileUploadZone";
 import { SubmissionFileList } from "@/components/SubmissionFileList";
 import { SubmissionStatusBadge } from "@/components/SubmissionStatusBadge";
+import { SUBMISSION_LIMITS_SUMMARY } from "@/lib/fileValidation";
 
 interface StudentSubmissionPanelProps {
   assignmentId: string;
@@ -107,12 +108,16 @@ export function StudentSubmissionPanel({
       </div>
 
       {editable && (
-        <div className="mt-6">
+        <div className="mt-6 space-y-2.5">
           <FileUploadZone
             onFilesSelected={addFiles}
             uploading={uploading}
             disabled={uploading}
           />
+          <div className="rounded-xl bg-gray-50 px-3.5 py-2.5 text-xs text-gray-500 dark:bg-gray-800/60 dark:text-gray-400">
+            <span className="font-medium text-gray-600 dark:text-gray-300">Submission limits: </span>
+            {SUBMISSION_LIMITS_SUMMARY.join(" · ")}
+          </div>
         </div>
       )}
 

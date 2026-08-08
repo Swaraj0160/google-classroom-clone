@@ -7,6 +7,7 @@ import {
   uploadSubmissionFiles,
   deleteSubmissionFile,
 } from "@/lib/submission-storage";
+import { validateSubmissionFiles } from "@/lib/fileValidation";
 import type { SubmissionWithFiles, AssignmentSummary } from "@/types/submission";
 
 interface UseStudentSubmissionResult {
@@ -141,6 +142,13 @@ export function useStudentSubmission(
   const addFiles = useCallback(
     async (files: File[]) => {
       if (!submission || !studentId || files.length === 0) return;
+
+      const validation = validateSubmissionFiles(submission.files, files);
+      if (!validation.valid) {
+        showToast.error(validation.message ?? "These files can't be uploaded.");
+        return;
+      }
+
       setUploading(true);
 
       const previousFiles = submission.files;
