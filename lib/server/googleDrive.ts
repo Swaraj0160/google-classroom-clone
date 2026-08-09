@@ -78,7 +78,23 @@ async function getOrCreateFolder(
 /** Walks/creates a nested folder path under the app's root Drive folder. */
 export async function resolveFolderPath(segments: string[]): Promise<string> {
   const drive = getDriveClient();
-  let parentId = rootFolderId();
+  const rootId = rootFolderId();
+
+  try {
+    await drive.files.get({ fileId: rootId, fields: "id", supportsAllDrives: true });
+  } catch (err) {
+    const code = (err as { code?: number })?.code;
+    if (code === 404) {
+      console.error(
+        "[googleDrive] Root folder is not visible to the OAuth-authorized account.",
+        "Either re-run /api/auth/google signed into the account that owns the folder,",
+        "or share the folder (Editor) with the account that was used to authorize."
+      );
+    }
+    throw err;
+  }
+
+  let parentId = rootId;
   for (const segment of segments) {
     if (!segment) continue;
     parentId = await getOrCreateFolder(drive, parentId, segment);
