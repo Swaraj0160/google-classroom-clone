@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Loader2, X } from "lucide-react";
 import { FileUploader, LinkAttachmentDraft } from "./FileUploader";
+import { ExistingAttachmentsList } from "./ExistingAttachmentsList";
 import { ClassworkFormInput, ClassworkItem, Topic } from "@/types/classwork";
 
 interface CreateMaterialModalProps {
@@ -31,6 +32,18 @@ export function CreateMaterialModal({
   const [topicId, setTopicId] = useState<string | null>(initial?.topic_id ?? defaultTopicId);
   const [files, setFiles] = useState<File[]>([]);
   const [links, setLinks] = useState<LinkAttachmentDraft[]>([]);
+  const [removedAttachmentIds, setRemovedAttachmentIds] = useState<Set<string>>(new Set());
+
+  const existingAttachments = initial?.attachments ?? [];
+
+  const toggleRemoveAttachment = (id: string) => {
+    setRemovedAttachmentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   if (!open) return null;
 
@@ -49,6 +62,7 @@ export function CreateMaterialModal({
       type: "material",
       files,
       links,
+      removedAttachmentIds: [...removedAttachmentIds],
     });
   };
 
@@ -114,6 +128,11 @@ export function CreateMaterialModal({
             <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-300">
               Attachments
             </label>
+            <ExistingAttachmentsList
+              attachments={existingAttachments}
+              removedIds={removedAttachmentIds}
+              onToggleRemove={toggleRemoveAttachment}
+            />
             <FileUploader files={files} links={links} onFilesChange={setFiles} onLinksChange={setLinks} />
           </div>
 

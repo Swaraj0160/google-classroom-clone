@@ -56,4 +56,6 @@ export interface ClassworkFormInput {
   type: ClassworkType;
   files: File[];
   links: { kind: "youtube" | "drive" | "link"; url: string }[];
+  /** Existing attachment ids to delete (edit mode only). */
+  removedAttachmentIds?: string[];
 }

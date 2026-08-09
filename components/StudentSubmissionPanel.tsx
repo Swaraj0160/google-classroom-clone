@@ -41,8 +41,10 @@ export function StudentSubmissionPanel({
 
   if (!submission) return null;
 
-  const editable =
-    submission.status === "pending";
+  // Files can be added/removed any time before grading — this is what lets a
+  // student replace/re-upload work even after already turning it in.
+  const filesEditable = submission.status !== "graded";
+  const canTurnIn = submission.status === "pending";
 
   const submitted =
     submission.status === "submitted" ||
@@ -102,13 +104,18 @@ export function StudentSubmissionPanel({
       <div className="mt-6">
         <SubmissionFileList
           files={submission.files}
-          removable={editable}
+          removable={filesEditable}
           onRemove={removeFile}
         />
       </div>
 
-      {editable && (
+      {filesEditable && (
         <div className="mt-6 space-y-2.5">
+          {submitted && (
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+              You can still add or remove files — your submission updates automatically.
+            </p>
+          )}
           <FileUploadZone
             onFilesSelected={addFiles}
             uploading={uploading}
@@ -122,7 +129,7 @@ export function StudentSubmissionPanel({
       )}
 
       <div className="mt-6 flex flex-wrap gap-3">
-        {editable && (
+        {canTurnIn && (
           <button
             onClick={submit}
             disabled={

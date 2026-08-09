@@ -27,6 +27,7 @@ export default function StreamTab({
     updateAnnouncement,
     togglePin,
     deleteAnnouncement,
+    deleteAttachment,
     addComment,
     deleteComment,
   } = useAnnouncements(courseId);
@@ -84,6 +85,7 @@ export default function StreamTab({
             currentUserId={profile?.id ?? null}
             onEdit={updateAnnouncement}
             onDelete={deleteAnnouncement}
+            onDeleteAttachment={deleteAttachment}
             onTogglePin={togglePin}
             onAddComment={addComment}
             onDeleteComment={deleteComment}

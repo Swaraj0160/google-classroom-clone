@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { uploadCourseFile } from "@/lib/storage";
+import { uploadCourseFile, deleteCourseFile } from "@/lib/storage";
 import { Announcement, NewAnnouncementInput } from "@/lib/types";
 import { showToast } from "@/lib/toast";
 
@@ -28,6 +28,7 @@ interface UseAnnouncementsResult {
   updateAnnouncement: (id: string, content: string) => Promise<void>;
   togglePin: (id: string, isPinned: boolean) => Promise<void>;
   deleteAnnouncement: (id: string) => Promise<void>;
+  deleteAttachment: (attachmentId: string, filePath: string) => Promise<void>;
   addComment: (announcementId: string, content: string) => Promise<void>;
   deleteComment: (commentId: string, announcementId: string) => Promise<void>;
 }
@@ -156,6 +157,31 @@ export function useAnnouncements(courseId: string): UseAnnouncementsResult {
     }
   }, []);
 
+  const deleteAttachment = useCallback(async (attachmentId: string, filePath: string) => {
+    try {
+      // Delete the storage object first, while the attachment row still
+      // exists — the file API authorizes deletes via that ownership chain.
+      await deleteCourseFile(filePath);
+
+      const { error: deleteError } = await supabase
+        .from("announcement_attachments")
+        .delete()
+        .eq("id", attachmentId);
+      if (deleteError) throw deleteError;
+
+      setAnnouncements((prev) =>
+        prev.map((a) => ({
+          ...a,
+          attachments: (a.attachments ?? []).filter((att) => att.id !== attachmentId),
+        }))
+      );
+      showToast.success("Attachment removed");
+    } catch (err) {
+      showToast.error(err instanceof Error ? err.message : "Failed to remove attachment");
+      throw err;
+    }
+  }, []);
+
   const addComment = useCallback(
     async (announcementId: string, content: string) => {
       try {
@@ -209,6 +235,7 @@ export function useAnnouncements(courseId: string): UseAnnouncementsResult {
     updateAnnouncement,
     togglePin,
     deleteAnnouncement,
+    deleteAttachment,
     addComment,
     deleteComment,
   };

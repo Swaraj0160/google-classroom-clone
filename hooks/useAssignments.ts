@@ -153,6 +153,27 @@ export function useAssignments(courseId: string): UseAssignmentsResult {
 
         if (updateError) throw updateError;
 
+        if (input.removedAttachmentIds && input.removedAttachmentIds.length > 0) {
+          const target = assignments.find((a) => a.id === id);
+          const toRemove = (target?.attachments ?? []).filter((a) =>
+            input.removedAttachmentIds!.includes(a.id)
+          );
+
+          // Delete storage objects first, while the attachment rows still
+          // exist — the file API authorizes deletes via that ownership chain.
+          await Promise.all(
+            toRemove
+              .filter((a) => a.file_path)
+              .map((a) => deleteCourseFile(a.file_path as string).catch(() => undefined))
+          );
+
+          const { error: removeError } = await supabase
+            .from("assignment_attachments")
+            .delete()
+            .in("id", input.removedAttachmentIds);
+          if (removeError) throw removeError;
+        }
+
         await uploadAttachments(id, input);
 
         showToast.success("Assignment updated");
@@ -164,7 +185,7 @@ export function useAssignments(courseId: string): UseAssignmentsResult {
         setSubmitting(false);
       }
     },
-    [fetchAssignments, uploadAttachments]
+    [assignments, fetchAssignments, uploadAttachments]
   );
 
   const deleteAssignment = useCallback(

@@ -37,6 +37,7 @@ interface AnnouncementCardProps {
 
   onEdit: (id: string, content: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onDeleteAttachment: (attachmentId: string, filePath: string) => Promise<void>;
   onTogglePin: (id: string, isPinned: boolean) => Promise<void>;
   onAddComment: (
     announcementId: string,
@@ -54,6 +55,7 @@ export default function AnnouncementCard({
   currentUserId,
   onEdit,
   onDelete,
+  onDeleteAttachment,
   onTogglePin,
   onAddComment,
   onDeleteComment,
@@ -216,6 +218,11 @@ export default function AnnouncementCard({
             <AttachmentChip
               key={attachment.id}
               attachment={attachment}
+              onDelete={
+                isFaculty
+                  ? () => onDeleteAttachment(attachment.id, attachment.file_path)
+                  : undefined
+              }
             />
           ))}
         </div>

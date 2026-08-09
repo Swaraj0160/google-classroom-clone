@@ -152,6 +152,7 @@ export function useStudentSubmission(
       setUploading(true);
 
       const previousFiles = submission.files;
+      const alreadyTurnedIn = submission.status === "submitted" || submission.status === "late";
 
       try {
         const uploaded = await uploadSubmissionFiles(assignmentId, studentId, files);
@@ -174,7 +175,33 @@ export function useStudentSubmission(
         setSubmission((prev) =>
           prev ? { ...prev, files: [...prev.files, ...(data ?? [])] } : prev
         );
-        showToast.success(`${files.length} file(s) attached.`);
+
+        // Replacing/adding files on an already-turned-in submission counts as
+        // a fresh turn-in — refresh the timestamp and re-evaluate late status
+        // instead of leaving a stale submitted_at from before the change.
+        if (alreadyTurnedIn) {
+          const now = new Date().toISOString();
+          const late = !!assignment?.due_date && new Date(assignment.due_date).getTime() < Date.now();
+          const newStatus = late ? "late" : "submitted";
+
+          const { error: resubmitError } = await supabase
+            .from("submissions")
+            .update({ status: newStatus, submitted_at: now })
+            .eq("id", submission.id)
+            .eq("student_id", studentId);
+
+          if (!resubmitError) {
+            setSubmission((prev) =>
+              prev ? { ...prev, status: newStatus, submitted_at: now } : prev
+            );
+          }
+        }
+
+        showToast.success(
+          alreadyTurnedIn
+            ? `${files.length} file(s) added — submission updated.`
+            : `${files.length} file(s) attached.`
+        );
       } catch (err) {
         console.error(err);
         setSubmission((prev) => (prev ? { ...prev, files: previousFiles } : prev));
@@ -183,16 +210,22 @@ export function useStudentSubmission(
         setUploading(false);
       }
     },
-    [submission, studentId, assignmentId]
+    [submission, studentId, assignmentId, assignment]
   );
 
   const removeFile = useCallback(
     async (fileId: string) => {
-      if (!submission) return;
+      if (!submission || !studentId) return;
       const file = submission.files.find((f) => f.id === fileId);
       if (!file) return;
 
       const previousFiles = submission.files;
+      const previousStatus = submission.status;
+      const previousSubmittedAt = submission.submitted_at;
+      // A "submitted" record with zero files left doesn't mean anything —
+      // fall back to pending so the UI (and Turn In button) stay consistent.
+      const willRevertToPending =
+        submission.files.length === 1 && submission.status !== "pending";
 
       setSubmission((prev) =>
         prev ? { ...prev, files: prev.files.filter((f) => f.id !== fileId) } : prev
@@ -203,14 +236,34 @@ export function useStudentSubmission(
         const { error } = await supabase.from("submission_files").delete().eq("id", fileId);
         if (error) throw error;
 
-        showToast.success("File removed.");
+        if (willRevertToPending) {
+          const { error: revertError } = await supabase
+            .from("submissions")
+            .update({ status: "pending", submitted_at: null })
+            .eq("id", submission.id)
+            .eq("student_id", studentId);
+
+          if (!revertError) {
+            setSubmission((prev) =>
+              prev ? { ...prev, status: "pending", submitted_at: null } : prev
+            );
+          }
+        }
+
+        showToast.success(
+          willRevertToPending ? "File removed — submission withdrawn (no files left)." : "File removed."
+        );
       } catch (err) {
         console.error(err);
-        setSubmission((prev) => (prev ? { ...prev, files: previousFiles } : prev));
+        setSubmission((prev) =>
+          prev
+            ? { ...prev, files: previousFiles, status: previousStatus, submitted_at: previousSubmittedAt }
+            : prev
+        );
         showToast.error("Failed to remove file.");
       }
     },
-    [submission]
+    [submission, studentId]
   );
 
   const submit = useCallback(async () => {

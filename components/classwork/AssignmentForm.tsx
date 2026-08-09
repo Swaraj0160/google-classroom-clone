@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { FileUploader, LinkAttachmentDraft } from "./FileUploader";
+import { ExistingAttachmentsList } from "./ExistingAttachmentsList";
 import {
   ClassworkFormInput,
   ClassworkItem,
@@ -48,8 +49,18 @@ export function AssignmentForm({
   const [dueTime, setDueTime] = useState(initialDue.time);
   const [files, setFiles] = useState<File[]>([]);
   const [links, setLinks] = useState<LinkAttachmentDraft[]>([]);
+  const [removedAttachmentIds, setRemovedAttachmentIds] = useState<Set<string>>(new Set());
 
   const existingAttachments = initial?.attachments ?? [];
+
+  const toggleRemoveAttachment = (id: string) => {
+    setRemovedAttachmentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const buildInput = (status: ClassworkStatus): ClassworkFormInput => ({
     courseId,
@@ -64,6 +75,7 @@ export function AssignmentForm({
     type,
     files,
     links,
+    removedAttachmentIds: [...removedAttachmentIds],
   });
 
   const handleSubmit = async (status: ClassworkStatus) => {
@@ -174,13 +186,11 @@ export function AssignmentForm({
         <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-300">
           Attachments
         </label>
-        {existingAttachments.length > 0 && (
-          <p className="mb-2 text-[11px] text-gray-400">
-            {existingAttachments.length} existing attachment
-            {existingAttachments.length === 1 ? "" : "s"} will be kept. New files/links are added
-            below.
-          </p>
-        )}
+        <ExistingAttachmentsList
+          attachments={existingAttachments}
+          removedIds={removedAttachmentIds}
+          onToggleRemove={toggleRemoveAttachment}
+        />
         <FileUploader files={files} links={links} onFilesChange={setFiles} onLinksChange={setLinks} />
       </div>
 

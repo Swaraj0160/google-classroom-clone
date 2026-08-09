@@ -9,6 +9,7 @@ import {
   FileImage,
   FileText,
   Loader2,
+  Trash2,
 } from "lucide-react";
 
 import type { AnnouncementAttachment } from "@/lib/types";
@@ -35,13 +36,16 @@ function isPreviewable(fileType: string) {
 
 interface AttachmentChipProps {
   attachment: AnnouncementAttachment;
+  onDelete?: (attachment: AnnouncementAttachment) => Promise<void>;
 }
 
 export default function AttachmentChip({
   attachment,
+  onDelete,
 }: AttachmentChipProps) {
   const [previewing, setPreviewing] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const Icon = iconFor(attachment.file_type);
   const previewable = isPreviewable(attachment.file_type);
@@ -80,6 +84,18 @@ export default function AttachmentChip({
       );
     } finally {
       setDownloading(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!onDelete) return;
+    setDeleting(true);
+    try {
+      await onDelete(attachment);
+    } catch (err) {
+      showToast.error(err instanceof Error ? err.message : "Could not remove attachment");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -127,6 +143,17 @@ export default function AttachmentChip({
             <Download size={15} />
           )}
         </button>
+
+        {onDelete && (
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            title="Remove attachment"
+            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-60 dark:hover:bg-red-900/20"
+          >
+            {deleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+          </button>
+        )}
       </span>
     </div>
   );
