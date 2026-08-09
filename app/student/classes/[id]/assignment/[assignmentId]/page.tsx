@@ -39,6 +39,9 @@ export default function StudentAssignmentPage({
 
   async function load() {
     setLoading(true);
+    // Clear any previous assignment immediately so nothing below can ever
+    // render/act using a stale assignment while the new one is still loading.
+    setAssignment(null);
 
     const {
       data: { session },
@@ -195,7 +198,7 @@ export default function StudentAssignmentPage({
           )}
 
           <StudentSubmissionPanel
-            assignmentId={assignment.id}
+            assignmentId={assignmentId}
             studentId={studentId}
           />
 
