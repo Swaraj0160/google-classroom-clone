@@ -173,8 +173,9 @@ export function StudentSubmissionPanel({
         )}
 
         {submitted && isPastDue && (
-          <p className="text-sm text-red-500">
-            Due date has passed. You can no longer unsubmit.
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Past due — you can still update your files above, but you can no longer withdraw
+            (unsubmit) this submission.
           </p>
         )}
       </div>
