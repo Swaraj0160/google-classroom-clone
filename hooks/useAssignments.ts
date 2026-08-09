@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { showToast } from "@/lib/toast";
-import { uploadCourseFile, deleteCourseFile } from "@/lib/storage";
+import { uploadCourseFile, deleteCourseFile, copyCourseFile } from "@/lib/storage";
 import { combineDueDateTime, detectLinkKind } from "@/lib/classwork";
 import { ClassworkFormInput, ClassworkItem, ClassworkStatus } from "@/types/classwork";
 
@@ -175,12 +175,15 @@ export function useAssignments(courseId: string): UseAssignmentsResult {
           .map((a) => a.file_path)
           .filter((p): p is string => !!p);
 
-        const { error: deleteError } = await supabase.from("assignments").delete().eq("id", id);
-        if (deleteError) throw deleteError;
-
+        // Delete storage objects first, while the assignment_attachments rows
+        // (and their parent assignment/course) still exist — the file API
+        // authorizes deletes by looking up that ownership chain.
         if (paths.length > 0) {
           await Promise.all(paths.map((p) => deleteCourseFile(p).catch(() => undefined)));
         }
+
+        const { error: deleteError } = await supabase.from("assignments").delete().eq("id", id);
+        if (deleteError) throw deleteError;
 
         setAssignments((prev) => prev.filter((a) => a.id !== id));
         showToast.success("Assignment deleted");
@@ -237,17 +240,18 @@ export function useAssignments(courseId: string): UseAssignmentsResult {
         const copiedFileRows = await Promise.all(
           fileAttachments.map(async (a) => {
             const originalPath = a.file_path as string;
-            const fileName = originalPath.split("/").pop() ?? a.file_name ?? "file";
-            const newPath = `${source.course_id}/assignments/${copy.id}/${fileName}`;
-            const { error: copyError } = await supabase.storage
-              .from("classroom-files")
-              .copy(originalPath, newPath);
-            if (copyError) throw copyError;
+            const fileName = a.file_name ?? originalPath.split("/").pop() ?? "file";
+            const copied = await copyCourseFile(
+              originalPath,
+              source.course_id,
+              `assignments/${copy.id}`,
+              fileName
+            );
             return {
               assignment_id: copy.id,
               kind: "file" as const,
               file_name: a.file_name,
-              file_path: newPath,
+              file_path: copied.path,
               file_type: a.file_type,
               file_size: a.file_size,
               url: null,

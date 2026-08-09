@@ -165,12 +165,15 @@ export function useMaterials(courseId: string): UseMaterialsResult {
           .map((a) => a.file_path)
           .filter((p): p is string => !!p);
 
-        const { error: deleteError } = await supabase.from("assignments").delete().eq("id", id);
-        if (deleteError) throw deleteError;
-
+        // Delete storage objects first, while the attachment rows (and their
+        // parent course) still exist — the file API authorizes deletes by
+        // looking up that ownership chain.
         if (paths.length > 0) {
           await Promise.all(paths.map((p) => deleteCourseFile(p).catch(() => undefined)));
         }
+
+        const { error: deleteError } = await supabase.from("assignments").delete().eq("id", id);
+        if (deleteError) throw deleteError;
 
         setMaterials((prev) => prev.filter((m) => m.id !== id));
         showToast.success("Material deleted");

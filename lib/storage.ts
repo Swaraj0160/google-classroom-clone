@@ -21,8 +21,23 @@ export function assertFileSize(file: File) {
 }
 
 /**
- * Uploads a file under <courseId>/<scope>/<timestamp>-<filename>.
- * `scope` examples: "announcements/<announcementId>", "assignments/<assignmentId>", "submissions/<submissionId>"
+ * A Google Drive file id never contains "/"; every legacy Supabase Storage
+ * path does (courseId/scope/filename). This lets old and new files coexist
+ * in the same `file_path` column with no schema change.
+ */
+function isDriveFileId(path: string): boolean {
+  return !path.includes("/");
+}
+
+async function readApiError(res: Response, fallback: string): Promise<string> {
+  const body = await res.json().catch(() => null);
+  return body?.error ?? fallback;
+}
+
+/**
+ * Uploads a new file to Google Drive via the server API (courseId/scope
+ * decide the Drive folder: courses/{courseId}/{scope}). The browser never
+ * talks to Google/Supabase Storage directly for new uploads.
  */
 export async function uploadCourseFile(
   courseId: string,
@@ -31,27 +46,30 @@ export async function uploadCourseFile(
 ): Promise<UploadedFile> {
   assertFileSize(file);
 
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const path = `${courseId}/${scope}/${Date.now()}-${safeName}`;
+  const form = new FormData();
+  form.append("mode", "course");
+  form.append("courseId", courseId);
+  form.append("scope", scope);
+  form.append("file", file);
 
-  const { error } = await supabase.storage
-    .from(CLASSROOM_BUCKET)
-    .upload(path, file, { cacheControl: "3600", upsert: false });
-
-  if (error) throw error;
-
-  return {
-    path,
-    name: file.name,
-    type: file.type || "application/octet-stream",
-    size: file.size,
-  };
+  const res = await fetch("/api/files/upload", { method: "POST", body: form });
+  if (!res.ok) throw new Error(await readApiError(res, "Upload failed."));
+  return res.json();
 }
 
+/**
+ * Returns a URL the browser can open/fetch to view or download a file.
+ * Drive files are served through our own authenticated API route; legacy
+ * files keep using a Supabase signed URL exactly as before.
+ */
 export async function getSignedFileUrl(
   path: string,
   expiresInSeconds = 3600
 ): Promise<string> {
+  if (isDriveFileId(path)) {
+    return `/api/files/view/${encodeURIComponent(path)}`;
+  }
+
   const { data, error } = await supabase.storage
     .from(CLASSROOM_BUCKET)
     .createSignedUrl(path, expiresInSeconds);
@@ -61,6 +79,43 @@ export async function getSignedFileUrl(
 }
 
 export async function deleteCourseFile(path: string): Promise<void> {
+  if (isDriveFileId(path)) {
+    const res = await fetch("/api/files/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileId: path }),
+    });
+    if (!res.ok) throw new Error(await readApiError(res, "Delete failed."));
+    return;
+  }
+
   const { error } = await supabase.storage.from(CLASSROOM_BUCKET).remove([path]);
   if (error) throw error;
+}
+
+/**
+ * Copies a file into a new course/scope location — used by assignment
+ * duplication. Hybrid-aware: copies within Drive, or within Supabase
+ * Storage, depending on where the source file actually lives.
+ */
+export async function copyCourseFile(
+  sourcePath: string,
+  courseId: string,
+  scope: string,
+  fileName: string
+): Promise<UploadedFile> {
+  if (isDriveFileId(sourcePath)) {
+    const res = await fetch("/api/files/copy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileId: sourcePath, courseId, scope }),
+    });
+    if (!res.ok) throw new Error(await readApiError(res, "Copy failed."));
+    return res.json();
+  }
+
+  const newPath = `${courseId}/${scope}/${fileName}`;
+  const { error } = await supabase.storage.from(CLASSROOM_BUCKET).copy(sourcePath, newPath);
+  if (error) throw error;
+  return { path: newPath, name: fileName, type: "", size: 0 };
 }

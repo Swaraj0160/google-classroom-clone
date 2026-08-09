@@ -1,30 +1,23 @@
 // ============================================================================
 // STUDENT SUBMISSION SYSTEM — Storage Helper
-// Bucket: submissions (private)
-// Path:
-// submissions/
-//    assignment_id/
-//       student_id/
-//          uuid-filename.ext
+// New uploads go to Google Drive via /api/files/*. Legacy files already in
+// the "submissions" Supabase Storage bucket keep working through the
+// original Supabase code path — see isDriveFileId().
 // ============================================================================
+
+"use client";
 
 import { supabase } from "@/lib/supabase";
 
 const BUCKET = "submissions";
 
-function buildPath(
-  assignmentId: string,
-  studentId: string,
-  fileName: string
-): string {
-  const safeName = fileName.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+function isDriveFileId(path: string): boolean {
+  return !path.includes("/");
+}
 
-  const unique =
-    typeof crypto !== "undefined" && crypto.randomUUID
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
-  return `${assignmentId}/${studentId}/${unique}-${safeName}`;
+async function readApiError(res: Response, fallback: string): Promise<string> {
+  const body = await res.json().catch(() => null);
+  return body?.error ?? fallback;
 }
 
 export interface UploadResult {
@@ -35,29 +28,28 @@ export interface UploadResult {
 }
 
 /**
- * Upload single submission file
+ * Upload single submission file (Google Drive, via the server API)
  */
 export async function uploadSubmissionFile(
   assignmentId: string,
   studentId: string,
   file: File
 ): Promise<UploadResult> {
-  const path = buildPath(assignmentId, studentId, file.name);
+  const form = new FormData();
+  form.append("mode", "submission");
+  form.append("assignmentId", assignmentId);
+  form.append("studentId", studentId);
+  form.append("file", file);
 
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .upload(path, file, {
-      cacheControl: "31536000",
-      upsert: false,
-    });
+  const res = await fetch("/api/files/upload", { method: "POST", body: form });
+  if (!res.ok) throw new Error(await readApiError(res, "Upload failed."));
 
-  if (error) throw error;
-
+  const uploaded = await res.json();
   return {
-    path,
-    fileName: file.name,
-    fileSize: file.size,
-    fileType: file.type || "application/octet-stream",
+    path: uploaded.path,
+    fileName: uploaded.name ?? file.name,
+    fileSize: uploaded.size ?? file.size,
+    fileType: uploaded.type || file.type || "application/octet-stream",
   };
 }
 
@@ -77,9 +69,19 @@ export async function uploadSubmissionFiles(
 }
 
 /**
- * Delete one file
+ * Delete one file — hybrid-aware.
  */
 export async function deleteSubmissionFile(path: string): Promise<void> {
+  if (isDriveFileId(path)) {
+    const res = await fetch("/api/files/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileId: path }),
+    });
+    if (!res.ok) throw new Error(await readApiError(res, "Delete failed."));
+    return;
+  }
+
   const { error } = await supabase.storage
     .from(BUCKET)
     .remove([path]);
@@ -94,21 +96,20 @@ export async function deleteSubmissionFiles(
   paths: string[]
 ): Promise<void> {
   if (!paths.length) return;
-
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .remove(paths);
-
-  if (error) throw error;
+  await Promise.all(paths.map((p) => deleteSubmissionFile(p)));
 }
 
 /**
- * Get signed URL
+ * Get a URL to view/download a file — hybrid-aware.
  */
 export async function getSubmissionFileUrl(
   path: string,
   expiresInSeconds = 600
 ): Promise<string> {
+  if (isDriveFileId(path)) {
+    return `/api/files/view/${encodeURIComponent(path)}`;
+  }
+
   const { data, error } = await supabase.storage
     .from(BUCKET)
     .createSignedUrl(path, expiresInSeconds);
@@ -119,19 +120,28 @@ export async function getSubmissionFileUrl(
 }
 
 /**
- * Download file
+ * Download file — hybrid-aware.
  */
 export async function downloadSubmissionFile(
   path: string,
   fileName: string
 ): Promise<void> {
-  const { data, error } = await supabase.storage
-    .from(BUCKET)
-    .download(path);
+  let blob: Blob;
 
-  if (error) throw error;
+  if (isDriveFileId(path)) {
+    const res = await fetch(`/api/files/view/${encodeURIComponent(path)}`);
+    if (!res.ok) throw new Error(await readApiError(res, "Download failed."));
+    blob = await res.blob();
+  } else {
+    const { data, error } = await supabase.storage
+      .from(BUCKET)
+      .download(path);
 
-  const url = URL.createObjectURL(data);
+    if (error) throw error;
+    blob = data;
+  }
+
+  const url = URL.createObjectURL(blob);
 
   const a = document.createElement("a");
   a.href = url;
