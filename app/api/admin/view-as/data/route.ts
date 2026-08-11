@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, getViewedUserId } from "@/lib/server/viewAs";
-import { createSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
+import { createSupabaseAdminClient, adminErrorResponse } from "@/lib/server/supabaseAdmin";
 
 /**
  * Consolidated, read-only data bundle for the profile currently being
@@ -18,23 +18,20 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "No active View As session." }, { status: 400 });
   }
 
-  const supabaseAdmin = createSupabaseAdminClient();
-
-  const { data: profile, error: profileError } = await supabaseAdmin
-    .from("profiles")
-    .select("id, full_name, email, role, roll_number, created_at")
-    .eq("id", viewedUserId)
-    .maybeSingle();
-
-  if (profileError) {
-    console.error("[api/admin/view-as/data] profile", profileError.message);
-    return NextResponse.json({ error: "Failed to load profile." }, { status: 500 });
-  }
-  if (!profile) {
-    return NextResponse.json({ error: "That profile no longer exists." }, { status: 404 });
-  }
-
   try {
+    const supabaseAdmin = createSupabaseAdminClient();
+
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from("profiles")
+      .select("id, full_name, email, role, roll_number, created_at")
+      .eq("id", viewedUserId)
+      .maybeSingle();
+
+    if (profileError) throw profileError;
+    if (!profile) {
+      return NextResponse.json({ error: "That profile no longer exists." }, { status: 404 });
+    }
+
     if (profile.role === "student") {
       const { data: enrollments } = await supabaseAdmin
         .from("enrollments")
@@ -120,7 +117,6 @@ export async function GET(request: NextRequest) {
     // just their profile.
     return NextResponse.json({ profile });
   } catch (err) {
-    console.error("[api/admin/view-as/data]", err instanceof Error ? err.message : err);
-    return NextResponse.json({ error: "Failed to load view-as data." }, { status: 500 });
+    return adminErrorResponse("api/admin/view-as/data", err, "Failed to load view-as data.");
   }
 }

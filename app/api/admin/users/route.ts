@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/viewAs";
-import { createSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
+import { createSupabaseAdminClient, adminErrorResponse } from "@/lib/server/supabaseAdmin";
 
 export async function GET(request: NextRequest) {
   const admin = await requireAdmin(request);
@@ -12,14 +12,13 @@ export async function GET(request: NextRequest) {
     const supabaseAdmin = createSupabaseAdminClient();
     const { data, error } = await supabaseAdmin
       .from("profiles")
-      .select("id, full_name, email, role, roll_number")
+      .select("id, full_name, email, role, roll_number, created_at")
       .order("full_name", { ascending: true });
 
     if (error) throw error;
 
     return NextResponse.json({ users: data ?? [] });
   } catch (err) {
-    console.error("[api/admin/users]", err instanceof Error ? err.message : err);
-    return NextResponse.json({ error: "Failed to load users." }, { status: 500 });
+    return adminErrorResponse("api/admin/users", err, "Failed to load users.");
   }
 }

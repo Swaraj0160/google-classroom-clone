@@ -32,7 +32,14 @@ export async function getRealUser(request: NextRequest): Promise<RealUser | null
 
 export async function requireAdmin(request: NextRequest): Promise<RealUser | null> {
   const real = await getRealUser(request);
-  if (!real || real.role !== "admin") return null;
+  if (!real) {
+    console.error("[requireAdmin] no authenticated session found on request");
+    return null;
+  }
+  if (real.role !== "admin") {
+    console.error(`[requireAdmin] caller ${real.id} has role "${real.role ?? "none"}", not admin`);
+    return null;
+  }
   return real;
 }
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, VIEW_AS_COOKIE } from "@/lib/server/viewAs";
-import { createSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
+import { createSupabaseAdminClient, adminErrorResponse } from "@/lib/server/supabaseAdmin";
 
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 2; // 2 hours — auto-expires a forgotten session
 
@@ -55,8 +55,7 @@ export async function POST(request: NextRequest) {
     });
     return res;
   } catch (err) {
-    console.error("[api/admin/view-as] start", err instanceof Error ? err.message : err);
-    return NextResponse.json({ error: "Could not start View As." }, { status: 500 });
+    return adminErrorResponse("api/admin/view-as start", err, "Could not start View As.");
   }
 }
 

@@ -35,7 +35,12 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ active: true, viewedUser });
   } catch (err) {
-    console.error("[api/admin/view-as/status]", err instanceof Error ? err.message : err);
+    // Soft-fail to inactive so a misconfigured admin client never breaks
+    // navigation for non-admins; still log the real cause for diagnosis.
+    console.error(
+      "[api/admin/view-as/status]",
+      err instanceof Error ? `${err.name}: ${err.message}` : err
+    );
     return NextResponse.json({ active: false, viewedUser: null });
   }
 }

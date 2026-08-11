@@ -20,6 +20,7 @@ export default function AdminUsersPage() {
   const router = useRouter();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
   const [confirmTarget, setConfirmTarget] = useState<AdminUser | null>(null);
@@ -32,8 +33,11 @@ export default function AdminUsersPage() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Failed to load users.");
         setUsers(data.users ?? []);
+        setLoadError(null);
       } catch (err) {
-        showToast.error(err instanceof Error ? err.message : "Failed to load users.");
+        const message = err instanceof Error ? err.message : "Failed to load users.";
+        setLoadError(message);
+        showToast.error(message);
       } finally {
         setLoading(false);
       }
@@ -124,7 +128,14 @@ export default function AdminUsersPage() {
                 </td>
               </tr>
             )}
-            {!loading && filtered.length === 0 && (
+            {!loading && loadError && (
+              <tr>
+                <td colSpan={5} className="px-4 py-8 text-center text-red-600 dark:text-red-400">
+                  {loadError}
+                </td>
+              </tr>
+            )}
+            {!loading && !loadError && filtered.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-4 py-8 text-center text-ink-faint">
                   No users match your search.
@@ -132,6 +143,7 @@ export default function AdminUsersPage() {
               </tr>
             )}
             {!loading &&
+              !loadError &&
               filtered.map((u) => (
                 <tr key={u.id} className="border-b border-black/5 last:border-0 dark:border-white/5">
                   <td className="px-4 py-3 font-medium text-ink dark:text-white">
