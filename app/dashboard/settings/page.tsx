@@ -1,8 +1,19 @@
-import Image from "next/image";
-import { faculty } from "@/lib/data";
+"use client";
+
 import { Bell, Lock, Palette, User } from "lucide-react";
+import { useProfile } from "@/hooks/useProfile";
+
+function getInitials(name: string | null | undefined, email: string | undefined): string {
+  const source = (name && name.trim()) || email || "?";
+  const parts = source.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
 export default function SettingsPage() {
+  const { profile } = useProfile();
+  const displayName = profile?.full_name || profile?.email || "";
+
   return (
     <div className="animate-fadeInUp space-y-6">
       <div>
@@ -14,15 +25,14 @@ export default function SettingsPage() {
 
       <div className="rounded-2xl border border-black/5 bg-white p-6 shadow-card dark:border-white/5 dark:bg-surface-darkAlt">
         <div className="flex flex-wrap items-center gap-4">
-          <Image src={faculty.avatar} alt={faculty.name} width={72} height={72} className="rounded-full" />
+          <span className="flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-full bg-brand-blue/10 text-xl font-semibold text-brand-blue">
+            {getInitials(profile?.full_name, profile?.email)}
+          </span>
           <div>
-            <p className="text-lg font-semibold text-ink dark:text-white">{faculty.name}</p>
-            <p className="text-sm text-ink-faint">{faculty.title}</p>
-            <p className="text-sm text-ink-faint">{faculty.email}</p>
+            <p className="text-lg font-semibold text-ink dark:text-white">{displayName || "—"}</p>
+            <p className="text-sm text-ink-faint capitalize">{profile?.role ?? ""}</p>
+            <p className="text-sm text-ink-faint">{profile?.email}</p>
           </div>
-          <button className="ml-auto rounded-full border border-black/10 px-4 py-2 text-sm font-medium text-ink-soft transition-colors hover:bg-surface-alt dark:border-white/10 dark:text-gray-300 dark:hover:bg-white/5">
-            Edit profile
-          </button>
         </div>
       </div>
 
@@ -37,7 +47,7 @@ export default function SettingsPage() {
           return (
             <div
               key={s.title}
-              className="flex items-start gap-4 rounded-2xl border border-black/5 bg-white p-5 shadow-card transition-shadow hover:shadow-elevated dark:border-white/5 dark:bg-surface-darkAlt"
+              className="flex items-start gap-4 rounded-2xl border border-black/5 bg-white p-5 shadow-card dark:border-white/5 dark:bg-surface-darkAlt"
             >
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-brand-blue dark:bg-blue-500/10">
                 <Icon size={18} />

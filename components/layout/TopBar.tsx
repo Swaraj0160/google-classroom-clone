@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 import { useProfile } from "@/hooks/useProfile";
 import { useNotifications, type NotificationType } from "@/hooks/useNotifications";
 import { formatRelativeTime } from "@/lib/format";
@@ -62,6 +63,18 @@ export default function TopBar({
     markAsRead(id);
     setNotifOpen(false);
     router.push(href);
+  }
+
+  function goToSettings() {
+    setProfileOpen(false);
+    router.push("/dashboard/settings");
+  }
+
+  async function handleSignOut() {
+    setProfileOpen(false);
+    await supabase.auth.signOut();
+    router.push("/");
+    router.refresh();
   }
 
   return (
@@ -203,13 +216,22 @@ export default function TopBar({
                 <p className="text-xs text-ink-faint">{profile?.email}</p>
               </div>
               <div className="p-2">
-                <button className="w-full rounded-xl px-3 py-2 text-left text-sm text-ink-soft transition-colors hover:bg-surface-alt dark:text-gray-300 dark:hover:bg-white/5">
+                <button
+                  onClick={goToSettings}
+                  className="w-full rounded-xl px-3 py-2 text-left text-sm text-ink-soft transition-colors hover:bg-surface-alt dark:text-gray-300 dark:hover:bg-white/5"
+                >
                   My Profile
                 </button>
-                <button className="w-full rounded-xl px-3 py-2 text-left text-sm text-ink-soft transition-colors hover:bg-surface-alt dark:text-gray-300 dark:hover:bg-white/5">
+                <button
+                  onClick={goToSettings}
+                  className="w-full rounded-xl px-3 py-2 text-left text-sm text-ink-soft transition-colors hover:bg-surface-alt dark:text-gray-300 dark:hover:bg-white/5"
+                >
                   Account Settings
                 </button>
-                <button className="w-full rounded-xl px-3 py-2 text-left text-sm text-brand-red transition-colors hover:bg-red-50 dark:hover:bg-red-500/10">
+                <button
+                  onClick={handleSignOut}
+                  className="w-full rounded-xl px-3 py-2 text-left text-sm text-brand-red transition-colors hover:bg-red-50 dark:hover:bg-red-500/10"
+                >
                   Sign out
                 </button>
               </div>
