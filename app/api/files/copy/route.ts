@@ -2,9 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseRouteClient } from "@/lib/server/supabaseServer";
 import { authorizeFileAccess, authorizeCourseUpload } from "@/lib/server/fileAuthorization";
 import { resolveFolderPath, copyFile } from "@/lib/server/googleDrive";
+import { getViewedUserId, VIEW_ONLY_MESSAGE } from "@/lib/server/viewAs";
 
 export async function POST(request: NextRequest) {
   try {
+    if (getViewedUserId(request)) {
+      return NextResponse.json({ error: VIEW_ONLY_MESSAGE }, { status: 403 });
+    }
+
     const supabase = createSupabaseRouteClient(request);
     const {
       data: { user },

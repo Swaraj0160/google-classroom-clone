@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import ViewAsBanner from "@/components/admin/ViewAsBanner";
 
 export const metadata: Metadata = {
   title: "Faculty Classroom | Dashboard",
@@ -11,7 +12,10 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <ViewAsBanner />
+        {children}
+      </body>
     </html>
   );
 }
