@@ -204,9 +204,13 @@ export default function PeopleTab({ courseId, facultyId }: PeopleTabProps) {
                 <div>
                   <p className="flex items-center gap-2 text-sm font-medium text-ink dark:text-white">
                     {s.full_name || s.email}
-                    {s.roll_number && (
+                    {s.roll_number ? (
                       <span className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-medium text-ink-faint dark:bg-white/5">
                         Roll {s.roll_number}
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">
+                        Roll No.: Not set
                       </span>
                     )}
                   </p>

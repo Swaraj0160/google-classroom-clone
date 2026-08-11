@@ -180,9 +180,13 @@ export function AssignmentSubmissionOverview({
                       <span className="truncate">
                         {entry.student.full_name || entry.student.email}
                       </span>
-                      {entry.student.roll_number && (
+                      {entry.student.roll_number ? (
                         <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                           {entry.student.roll_number}
+                        </span>
+                      ) : (
+                        <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">
+                          Roll No.: Not set
                         </span>
                       )}
                     </p>

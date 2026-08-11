@@ -14,6 +14,7 @@ import {
   UserPlus,
   Clock3,
   CheckCheck,
+  IdCard,
 } from "lucide-react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -28,6 +29,7 @@ const NOTIFICATION_ICONS: Record<NotificationType, typeof Bell> = {
   announcement: Megaphone,
   enrollment: UserPlus,
   deadline: Clock3,
+  profile: IdCard,
 };
 
 function getInitials(name: string | null | undefined, email: string | undefined): string {

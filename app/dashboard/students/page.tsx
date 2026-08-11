@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Mail, Search } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { compareByRollNumber } from "@/lib/format";
 
 interface SubmissionMini {
   student_id: string;
@@ -162,14 +163,7 @@ export default function StudentsPage() {
         };
       });
 
-      rows.sort((a, b) => {
-        if (a.roll_number && b.roll_number) {
-          return a.roll_number.localeCompare(b.roll_number, undefined, { numeric: true });
-        }
-        if (a.roll_number) return -1;
-        if (b.roll_number) return 1;
-        return a.full_name.localeCompare(b.full_name);
-      });
+      rows.sort(compareByRollNumber);
 
       setStudents(rows);
       setLoading(false);
@@ -237,9 +231,13 @@ export default function StudentsPage() {
               </div>
 
               <div className="mt-3 flex flex-wrap gap-1.5 text-[11px]">
-                {s.roll_number && (
+                {s.roll_number ? (
                   <span className="rounded-full bg-surface-alt px-2 py-0.5 font-medium text-ink-soft dark:bg-white/5 dark:text-gray-300">
                     Roll: {s.roll_number}
+                  </span>
+                ) : (
+                  <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">
+                    Roll No.: Not set
                   </span>
                 )}
                 {s.division && (

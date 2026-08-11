@@ -8,6 +8,7 @@ export interface Profile {
   email: string;
   full_name: string | null;
   role: string;
+  roll_number: string | null;
   created_at: string;
 }
 
@@ -56,7 +57,7 @@ function loadProfile(force = false): Promise<void> {
 
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, email, full_name, role, created_at")
+        .select("id, email, full_name, role, roll_number, created_at")
         .eq("id", user.id)
         .maybeSingle();
 

@@ -327,7 +327,15 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
                       <p className="font-medium text-ink dark:text-white">
                         {student.full_name || student.email}
                       </p>
-                      <p className="text-[11px] text-ink-faint">{student.roll_number ?? "—"}</p>
+                      <p
+                        className={
+                          student.roll_number
+                            ? "text-[11px] text-ink-faint"
+                            : "text-[11px] font-medium text-amber-600 dark:text-amber-400"
+                        }
+                      >
+                        {student.roll_number ? `Roll ${student.roll_number}` : "Roll No.: Not set"}
+                      </p>
                     </td>
                     {assignments.map((a) => {
                       const submission = submissionByKey.get(`${student.id}:${a.id}`);

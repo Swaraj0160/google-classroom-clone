@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useProfile } from "@/hooks/useProfile";
 
 interface Profile {
   id: string;
@@ -54,6 +55,7 @@ const EDITABLE_FIELDS: { key: keyof Profile; label: string }[] = [
 ];
 
 export default function StudentProfilePage() {
+  const { refresh: refreshSharedProfile } = useProfile();
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [courses, setCourses] = useState<Enrollment[]>([]);
@@ -161,6 +163,9 @@ export default function StudentProfilePage() {
     if (!error) {
       setProfile({ ...profile, ...form });
       setEditing(false);
+      // Keep the shared profile cache (topbar notifications, dashboard
+      // banner) in sync so the roll-number prompt disappears immediately.
+      void refreshSharedProfile();
     }
 
     setSaving(false);

@@ -10,7 +10,8 @@ export type NotificationType =
   | "grade"
   | "announcement"
   | "enrollment"
-  | "deadline";
+  | "deadline"
+  | "profile";
 
 export interface AppNotification {
   id: string;
@@ -162,6 +163,18 @@ export function useNotifications(): UseNotificationsResult {
         });
       }
     } else if (profile.role === "student") {
+      if (!profile.roll_number || !profile.roll_number.trim()) {
+        items.push({
+          id: "profile:missing-roll-number",
+          type: "profile",
+          title: "Add your roll number",
+          message:
+            "Please add your roll number to your profile. Your faculty uses it to organize the class roster.",
+          timestamp: new Date().toISOString(),
+          href: "/student/profile",
+        });
+      }
+
       const { data: enrollments } = await supabase
         .from("enrollments")
         .select("course_id, course:courses(id, title)")

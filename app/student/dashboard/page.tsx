@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BookOpen, ClipboardCheck, Clock3, Bell } from "lucide-react";
+import { BookOpen, ClipboardCheck, Clock3, Bell, IdCard } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { UpcomingAssignments } from "@/components/UpcomingAssignments";
+import { useProfile } from "@/hooks/useProfile";
 
 interface Stats {
   classes: number;
@@ -19,6 +20,7 @@ interface Course {
 }
 
 export default function StudentDashboard() {
+  const { profile } = useProfile();
   const [stats, setStats] = useState<Stats>({
     classes: 0,
     pending: 0,
@@ -93,6 +95,24 @@ export default function StudentDashboard() {
           Welcome back 👋
         </p>
       </div>
+
+      {profile && !profile.roll_number?.trim() && (
+        <Link
+          href="/student/profile"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 transition-colors hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:hover:bg-amber-500/20"
+        >
+          <div className="flex items-center gap-3">
+            <IdCard className="shrink-0 text-amber-600 dark:text-amber-400" size={22} />
+            <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+              Please add your roll number to your profile. Your faculty uses it to organize the
+              class roster.
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white">
+            Add now
+          </span>
+        </Link>
+      )}
 
       <div className="grid gap-6 md:grid-cols-3">
 
