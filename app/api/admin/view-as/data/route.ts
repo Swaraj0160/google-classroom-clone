@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, getViewedUserId } from "@/lib/server/viewAs";
-import { createSupabaseAdminClient, adminErrorResponse } from "@/lib/server/supabaseAdmin";
+import { createSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
+import { adminErrorResponse } from "@/lib/server/adminApiError";
 
 /**
  * Consolidated, read-only data bundle for the profile currently being

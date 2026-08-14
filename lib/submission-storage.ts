@@ -8,12 +8,9 @@
 "use client";
 
 import { supabase } from "@/lib/supabase";
+import { isDriveFileId } from "@/lib/isDriveFileId";
 
 const BUCKET = "submissions";
-
-function isDriveFileId(path: string): boolean {
-  return !path.includes("/");
-}
 
 async function readApiError(res: Response, fallback: string): Promise<string> {
   const body = await res.json().catch(() => null);

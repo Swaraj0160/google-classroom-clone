@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, VIEW_AS_COOKIE } from "@/lib/server/viewAs";
-import { createSupabaseAdminClient, adminErrorResponse } from "@/lib/server/supabaseAdmin";
+import { createSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
+import { adminErrorResponse } from "@/lib/server/adminApiError";
 
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 2; // 2 hours — auto-expires a forgotten session
 

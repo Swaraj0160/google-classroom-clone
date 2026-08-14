@@ -1,6 +1,7 @@
 "use client";
 
 import { supabase } from "@/lib/supabase";
+import { isDriveFileId } from "@/lib/isDriveFileId";
 
 export const CLASSROOM_BUCKET = "classroom-files";
 
@@ -18,15 +19,6 @@ export function assertFileSize(file: File) {
   if (file.size > MAX_UPLOAD_SIZE_BYTES) {
     throw new Error(`"${file.name}" exceeds the 25MB upload limit.`);
   }
-}
-
-/**
- * A Google Drive file id never contains "/"; every legacy Supabase Storage
- * path does (courseId/scope/filename). This lets old and new files coexist
- * in the same `file_path` column with no schema change.
- */
-function isDriveFileId(path: string): boolean {
-  return !path.includes("/");
 }
 
 async function readApiError(res: Response, fallback: string): Promise<string> {

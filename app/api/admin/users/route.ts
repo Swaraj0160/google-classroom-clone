@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/server/viewAs";
-import { createSupabaseAdminClient, adminErrorResponse } from "@/lib/server/supabaseAdmin";
+import { createSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
+import { adminErrorResponse } from "@/lib/server/adminApiError";
 
 export async function GET(request: NextRequest) {
   const admin = await requireAdmin(request);
