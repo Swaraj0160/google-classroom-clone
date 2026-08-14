@@ -50,9 +50,47 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid upload mode." }, { status: 400 });
     }
 
+    console.log(
+      "[api/files/upload] stage=received",
+      JSON.stringify({ mode, fileName: file.name, fileSize: file.size, userId: user.id })
+    );
+
     const buffer = Buffer.from(await file.arrayBuffer());
-    const folderId = await resolveFolderPath(folderSegments);
-    const uploaded = await uploadFile(folderId, file.name, file.type, buffer);
+
+    let folderId: string;
+    try {
+      folderId = await resolveFolderPath(folderSegments);
+    } catch (err) {
+      console.error(
+        "[api/files/upload] stage=folder_resolve_failed",
+        JSON.stringify({ folderSegments }),
+        err instanceof Error ? err.message : err
+      );
+      const notConfigured = err instanceof Error && err.message.includes("not configured");
+      return NextResponse.json(
+        { error: notConfigured ? "File storage is not configured on the server." : "Upload failed. Please try again." },
+        { status: notConfigured ? 503 : 502 }
+      );
+    }
+
+    console.log("[api/files/upload] stage=folder_resolved", JSON.stringify({ folderId }));
+
+    let uploaded;
+    try {
+      uploaded = await uploadFile(folderId, file.name, file.type, buffer);
+    } catch (err) {
+      console.error(
+        "[api/files/upload] stage=drive_upload_failed",
+        JSON.stringify({ folderId, fileName: file.name }),
+        err instanceof Error ? err.message : err
+      );
+      return NextResponse.json({ error: "Upload failed. Please try again." }, { status: 502 });
+    }
+
+    console.log(
+      "[api/files/upload] stage=drive_upload_complete",
+      JSON.stringify({ driveFileId: uploaded.id, fileName: uploaded.name })
+    );
 
     return NextResponse.json({
       path: uploaded.id,
@@ -61,7 +99,7 @@ export async function POST(request: NextRequest) {
       size: uploaded.size || file.size,
     });
   } catch (err) {
-    console.error("[api/files/upload]", err instanceof Error ? err.message : err);
+    console.error("[api/files/upload] stage=unexpected", err instanceof Error ? err.message : err);
     return NextResponse.json({ error: "Upload failed. Please try again." }, { status: 500 });
   }
 }

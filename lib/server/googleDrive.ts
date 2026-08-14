@@ -2,6 +2,28 @@ import { google, drive_v3 } from "googleapis";
 import { Readable } from "stream";
 
 /**
+ * Extracts a safe-to-log summary from a googleapis error — HTTP status
+ * code, top-level message, and the API's structured reason (e.g.
+ * "notFound", "insufficientPermissions", "invalid_grant"). Never touches
+ * request/auth headers, so this can never leak the refresh token or
+ * client secret even though the raw error object technically has them
+ * attached to internal request config.
+ */
+function sanitizeDriveError(err: unknown): { code?: number | string; message?: string; reason?: string } {
+  const e = err as {
+    code?: number | string;
+    message?: string;
+    errors?: { reason?: string; message?: string }[];
+    response?: { status?: number; data?: { error?: { message?: string; status?: string } } };
+  };
+  return {
+    code: e?.code ?? e?.response?.status,
+    message: e?.response?.data?.error?.message ?? e?.message,
+    reason: e?.errors?.[0]?.reason ?? e?.response?.data?.error?.status,
+  };
+}
+
+/**
  * Regular Google accounts have no service-account storage quota, so Drive
  * access uses OAuth2 (authorization-code + refresh token) acting as the
  * actual account that owns "Faculty Classroom Storage". See
@@ -12,9 +34,17 @@ function getAuth() {
   const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
   const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN;
-  if (!clientId || !clientSecret || !refreshToken) {
+
+  const missing: string[] = [];
+  if (!clientId) missing.push("GOOGLE_OAUTH_CLIENT_ID");
+  if (!clientSecret) missing.push("GOOGLE_OAUTH_CLIENT_SECRET");
+  if (!refreshToken) missing.push("GOOGLE_OAUTH_REFRESH_TOKEN");
+  if (missing.length) {
+    // Names only — never values — so this is safe to log server-side.
+    console.error("[googleDrive] stage=not_configured missing:", missing.join(", "));
     throw new Error("Google Drive is not configured on the server.");
   }
+
   const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
   oauth2Client.setCredentials({ refresh_token: refreshToken });
   return oauth2Client;
@@ -26,7 +56,10 @@ function getDriveClient(): drive_v3.Drive {
 
 function rootFolderId(): string {
   const id = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID;
-  if (!id) throw new Error("Google Drive is not configured on the server.");
+  if (!id) {
+    console.error("[googleDrive] stage=not_configured missing: GOOGLE_DRIVE_ROOT_FOLDER_ID");
+    throw new Error("Google Drive is not configured on the server.");
+  }
   return id;
 }
 
@@ -83,21 +116,29 @@ export async function resolveFolderPath(segments: string[]): Promise<string> {
   try {
     await drive.files.get({ fileId: rootId, fields: "id", supportsAllDrives: true });
   } catch (err) {
-    const code = (err as { code?: number })?.code;
-    if (code === 404) {
+    const info = sanitizeDriveError(err);
+    if (info.code === 404) {
       console.error(
-        "[googleDrive] Root folder is not visible to the OAuth-authorized account.",
-        "Either re-run /api/auth/google signed into the account that owns the folder,",
+        "[googleDrive] stage=root_folder_get_failed reason=not_visible",
+        info,
+        "— either re-run /api/auth/google signed into the account that owns the folder,",
         "or share the folder (Editor) with the account that was used to authorize."
       );
+    } else {
+      console.error("[googleDrive] stage=root_folder_get_failed", info);
     }
     throw err;
   }
 
   let parentId = rootId;
-  for (const segment of segments) {
-    if (!segment) continue;
-    parentId = await getOrCreateFolder(drive, parentId, segment);
+  try {
+    for (const segment of segments) {
+      if (!segment) continue;
+      parentId = await getOrCreateFolder(drive, parentId, segment);
+    }
+  } catch (err) {
+    console.error("[googleDrive] stage=folder_resolve_failed", { segments }, sanitizeDriveError(err));
+    throw err;
   }
   return parentId;
 }
@@ -116,13 +157,26 @@ export async function uploadFile(
   buffer: Buffer
 ): Promise<DriveFileResult> {
   const drive = getDriveClient();
-  const res = await drive.files.create({
-    requestBody: { name: fileName, parents: [folderId] },
-    media: { mimeType: mimeType || "application/octet-stream", body: Readable.from(buffer) },
-    fields: "id, name, mimeType, size",
-    supportsAllDrives: true,
-  });
-  if (!res.data.id) throw new Error("Google Drive upload failed.");
+  let res;
+  try {
+    res = await drive.files.create({
+      requestBody: { name: fileName, parents: [folderId] },
+      media: { mimeType: mimeType || "application/octet-stream", body: Readable.from(buffer) },
+      fields: "id, name, mimeType, size",
+      supportsAllDrives: true,
+    });
+  } catch (err) {
+    console.error(
+      "[googleDrive] stage=upload_failed",
+      { folderId, fileName, size: buffer.byteLength },
+      sanitizeDriveError(err)
+    );
+    throw err;
+  }
+  if (!res.data.id) {
+    console.error("[googleDrive] stage=upload_no_file_id", { folderId, fileName });
+    throw new Error("Google Drive upload failed.");
+  }
   return {
     id: res.data.id,
     name: res.data.name ?? fileName,
