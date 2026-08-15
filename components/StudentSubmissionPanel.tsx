@@ -7,6 +7,7 @@ import { FileUploadZone } from "@/components/FileUploadZone";
 import { SubmissionFileList } from "@/components/SubmissionFileList";
 import { SubmissionStatusBadge } from "@/components/SubmissionStatusBadge";
 import { SUBMISSION_LIMITS_SUMMARY } from "@/lib/fileValidation";
+import { calculateSubmissionGrade, formatLateness } from "@/lib/grading";
 
 interface StudentSubmissionPanelProps {
   assignmentId: string;
@@ -53,6 +54,13 @@ export function StudentSubmissionPanel({
   const graded =
     submission.status === "graded";
 
+  const { lateByMs } = calculateSubmissionGrade({
+    dueAt: assignment?.due_date ?? null,
+    submittedAt: submission.submitted_at,
+    maxMarks: assignment?.total_marks ?? null,
+  });
+  const latenessLabel = formatLateness(lateByMs);
+
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-900">
       <div className="flex items-start justify-between">
@@ -92,6 +100,12 @@ export function StudentSubmissionPanel({
                 : ""}
             </div>
           </div>
+
+          {latenessLabel && (
+            <p className="mt-2 text-xs font-medium text-green-600/80 dark:text-green-400/80">
+              {latenessLabel}
+            </p>
+          )}
 
           {submission.feedback && (
             <div className="mt-4 whitespace-pre-wrap text-sm text-green-700 dark:text-green-300">

@@ -8,6 +8,7 @@ import { SubmissionFileList } from "@/components/SubmissionFileList";
 import { AttachmentPreview } from "@/components/classwork/AttachmentPreview";
 import type { SubmissionFile } from "@/types/submission";
 import type { AssignmentAttachment } from "@/types/classwork";
+import { deriveStatusAfterManualGrade } from "@/lib/grading";
 
 interface AssignmentRow {
   id: string;
@@ -154,20 +155,11 @@ export default function SubmissionReviewPage() {
       return;
     }
 
-    // Clearing marks on an already-graded submission should un-grade it —
-    // otherwise it's left showing "Graded" with no score.
     const wasLate =
       !!submission.submitted_at &&
       !!assignment?.due_date &&
       new Date(submission.submitted_at) > new Date(assignment.due_date);
-    const newStatus =
-      parsedMarks !== null
-        ? "graded"
-        : submission.status === "graded"
-        ? wasLate
-          ? "late"
-          : "submitted"
-        : submission.status;
+    const newStatus = deriveStatusAfterManualGrade(submission.status, wasLate, parsedMarks);
 
     const { data, error: updateError } = await supabase
       .from("submissions")

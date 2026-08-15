@@ -93,6 +93,63 @@ export function exportMarksToExcel(rows: MarksExportRow[], filename: string) {
   downloadBlob(xml, "application/vnd.ms-excel", filename);
 }
 
+export interface AssignmentGradesExportRow {
+  rollNumber: string;
+  studentName: string;
+  submissionStatus: string;
+  submittedAt: string;
+  lateStatus: string;
+  automaticGrade: string;
+  finalGrade: string;
+  reviewStatus: string;
+  feedback: string;
+}
+
+const ASSIGNMENT_GRADES_COLUMNS = [
+  "Roll Number",
+  "Student Name",
+  "Submission Status",
+  "Submitted At",
+  "Late Status",
+  "Automatic Grade",
+  "Final Grade",
+  "Review Status",
+  "Feedback",
+];
+
+function csvCell(value: string): string {
+  // RFC 4180: quote any field containing a comma, quote, or newline; double
+  // up embedded quotes.
+  if (/[",\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+/** Per-assignment roster export — deliberately excludes internal IDs. */
+export function exportAssignmentGradesToCsv(rows: AssignmentGradesExportRow[], filename: string) {
+  const lines = [
+    ASSIGNMENT_GRADES_COLUMNS.map(csvCell).join(","),
+    ...rows.map((row) =>
+      [
+        row.rollNumber,
+        row.studentName,
+        row.submissionStatus,
+        row.submittedAt,
+        row.lateStatus,
+        row.automaticGrade,
+        row.finalGrade,
+        row.reviewStatus,
+        row.feedback,
+      ]
+        .map(csvCell)
+        .join(",")
+    ),
+  ];
+  // Leading BOM so Excel opens UTF-8 CSVs (names with diacritics, etc.) correctly.
+  downloadBlob("﻿" + lines.join("\r\n"), "text/csv;charset=utf-8", filename);
+}
+
 export function exportMarksToPdf(rows: MarksExportRow[], filename: string, title: string) {
   const doc = new jsPDF({ orientation: "landscape" });
   doc.setFontSize(14);

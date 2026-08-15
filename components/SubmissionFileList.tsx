@@ -20,6 +20,11 @@ import {
   formatFileSize,
 } from "@/lib/submission-storage";
 import { showToast } from "@/lib/toast";
+import { FilePreviewModal } from "@/components/FilePreviewModal";
+
+function isInAppPreviewable(type: string | null) {
+  return !!type && (type === "application/pdf" || type.startsWith("image/"));
+}
 
 interface SubmissionFileListProps {
   files: SubmissionFile[];
@@ -61,6 +66,7 @@ export function SubmissionFileList({
 }: SubmissionFileListProps) {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [previewingId, setPreviewingId] = useState<string | null>(null);
+  const [modalFile, setModalFile] = useState<SubmissionFile | null>(null);
 
   if (!files.length) {
     return (
@@ -71,6 +77,10 @@ export function SubmissionFileList({
   }
 
   async function handlePreview(file: SubmissionFile) {
+    if (isInAppPreviewable(file.file_type)) {
+      setModalFile(file);
+      return;
+    }
     try {
       setPreviewingId(file.id);
       const url = await getSubmissionFileUrl(file.file_path);
@@ -175,6 +185,8 @@ export function SubmissionFileList({
           </div>
         );
       })}
+
+      {modalFile && <FilePreviewModal file={modalFile} onClose={() => setModalFile(null)} />}
     </div>
   );
 }

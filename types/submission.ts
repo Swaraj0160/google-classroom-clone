@@ -35,6 +35,11 @@ export interface Submission {
 
   feedback: string | null;
 
+  /** Independent of `marks`/`status` — a faculty member explicitly marking
+   *  a submission as looked-at. Defaults to false client-side on databases
+   *  that don't have this column yet (see hooks/useAssignmentSubmissions.ts). */
+  reviewed: boolean;
+
   created_at: string;
   updated_at: string;
 }

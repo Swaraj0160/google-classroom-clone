@@ -19,10 +19,37 @@ const LATE_WINDOW_MS = 48 * 60 * 60 * 1000;
 
 export type TimingCategory = "on_time" | "late_within_48h" | "late_after_48h";
 
+/**
+ * The percentage-of-max-marks awarded per timing category. This is the ONE
+ * place the 100/80/70 policy is defined — every caller (this module's own
+ * calculateSubmissionGrade, and anything downstream) goes through here.
+ * Not yet configurable per-assignment (no schema column for it exists),
+ * but calculateSubmissionGrade already accepts a policy override so an
+ * eventual assignment-level setting can be threaded in without touching
+ * this function's boundary logic or any of its callers' call sites.
+ */
+export interface LatePolicy {
+  onTimePercent: number;
+  within48hPercent: number;
+  after48hPercent: number;
+}
+
+export const DEFAULT_LATE_POLICY: LatePolicy = {
+  onTimePercent: 1,
+  within48hPercent: 0.8,
+  after48hPercent: 0.7,
+};
+
 export interface GradeCalculationInput {
+  /** The student's effective deadline — the assignment due date, or a
+   *  per-student extension once that feature exists. Callers should
+   *  resolve extensions before calling this; the function itself has no
+   *  concept of "assignment due date" vs "extension", only "the deadline
+   *  that applies to this student". */
   dueAt: string | null;
   submittedAt: string | null;
   maxMarks: number | null;
+  policy?: LatePolicy;
 }
 
 export interface GradeCalculationResult {
@@ -37,6 +64,7 @@ export function calculateSubmissionGrade({
   dueAt,
   submittedAt,
   maxMarks,
+  policy = DEFAULT_LATE_POLICY,
 }: GradeCalculationInput): GradeCalculationResult {
   if (!submittedAt) {
     return { suggestedMarks: null, timingCategory: null, lateByMs: null };
@@ -64,7 +92,11 @@ export function calculateSubmissionGrade({
   }
 
   const multiplier =
-    timingCategory === "on_time" ? 1 : timingCategory === "late_within_48h" ? 0.8 : 0.7;
+    timingCategory === "on_time"
+      ? policy.onTimePercent
+      : timingCategory === "late_within_48h"
+      ? policy.within48hPercent
+      : policy.after48hPercent;
 
   return { suggestedMarks: Math.round(maxMarks * multiplier), timingCategory, lateByMs };
 }
@@ -104,4 +136,23 @@ export function describeSubmissionStatus(
   if (timingCategory === "late_within_48h") return "late_within_48h";
   if (timingCategory === "late_after_48h") return "late_after_48h";
   return "on_time";
+}
+
+/**
+ * The submissions.status transition used whenever a faculty member sets or
+ * clears manual marks — same rule the existing grading page
+ * (app/dashboard/submissions/[id]/page.tsx) already applies, extracted here
+ * so the new assignment-workspace quick-grade editor uses the identical
+ * rule instead of a second, possibly-diverging copy of it.
+ */
+export function deriveStatusAfterManualGrade(
+  currentStatus: string,
+  wasLate: boolean,
+  newMarks: number | null
+): string {
+  if (newMarks !== null) return "graded";
+  // Clearing marks on an already-graded submission should un-grade it —
+  // otherwise it's left showing "Graded" with no score.
+  if (currentStatus === "graded") return wasLate ? "late" : "submitted";
+  return currentStatus;
 }
