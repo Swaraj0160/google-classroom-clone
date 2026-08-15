@@ -213,6 +213,7 @@ export default function AssignmentDetailsPage() {
           assignmentId={params.assignmentId}
           courseId={params.id}
           totalMarks={assignment.total_marks}
+          dueDate={assignment.due_date}
         />
       )}
 
