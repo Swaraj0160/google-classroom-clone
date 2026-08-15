@@ -6,6 +6,7 @@ import { useTopics } from "@/hooks/useTopics";
 import { useAssignments } from "@/hooks/useAssignments";
 import { useMaterials } from "@/hooks/useMaterials";
 import { useProfile } from "@/hooks/useProfile";
+import { useCourseSubmissionSummaries } from "@/hooks/useCourseSubmissionSummaries";
 import { ClassworkFormInput, ClassworkItem, ClassworkType } from "@/types/classwork";
 import { groupByTopic } from "@/lib/classwork";
 import { TopicSection } from "./TopicSection";
@@ -50,6 +51,13 @@ export function ClassworkTab({ courseId, facultyId }: ClassworkTabProps) {
   !!profile &&
   profile.role === "faculty" &&
   profile.id === facultyId;
+
+  // Only faculty see per-assignment submission counts on the card — skip
+  // the batched query entirely for students by passing an empty list.
+  const { summaries: submissionSummaries } = useCourseSubmissionSummaries(
+    courseId,
+    isFaculty ? assignmentsApi.assignments.map((a) => ({ id: a.id, due_date: a.due_date })) : []
+  );
 
   const allItems = useMemo(
     () => [...assignmentsApi.assignments, ...materialsApi.materials],
@@ -175,6 +183,8 @@ export function ClassworkTab({ courseId, facultyId }: ClassworkTabProps) {
               items={topic.items}
               allTopics={topicsApi.topics}
               isFaculty={isFaculty}
+              courseId={courseId}
+              submissionSummaries={submissionSummaries}
               isFirst={index === 0}
               isLast={index === grouped.length - 1}
               onOpenItem={handleOpenItem}
@@ -202,6 +212,8 @@ export function ClassworkTab({ courseId, facultyId }: ClassworkTabProps) {
               items={untopiced}
               allTopics={topicsApi.topics}
               isFaculty={isFaculty}
+              courseId={courseId}
+              submissionSummaries={submissionSummaries}
               isFirst={grouped.length === 0}
               isLast
               onOpenItem={handleOpenItem}

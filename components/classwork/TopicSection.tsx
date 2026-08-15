@@ -5,12 +5,15 @@ import { ClassworkItem, Topic } from "@/types/classwork";
 import { TopicCard } from "./TopicCard";
 import { AssignmentCard } from "./AssignmentCard";
 import { MaterialCard } from "./MaterialCard";
+import type { AssignmentCardSummary } from "@/hooks/useCourseSubmissionSummaries";
 
 interface TopicSectionProps {
   topic: Topic | null; // null = "No topic" bucket
   items: ClassworkItem[];
   allTopics: Topic[];
   isFaculty: boolean;
+  courseId: string;
+  submissionSummaries: Record<string, AssignmentCardSummary>;
   isFirst: boolean;
   isLast: boolean;
   onOpenItem: (item: ClassworkItem) => void;
@@ -30,6 +33,8 @@ export function TopicSection({
   items,
   allTopics,
   isFaculty,
+  courseId,
+  submissionSummaries,
   isFirst,
   isLast,
   onOpenItem,
@@ -82,6 +87,8 @@ export function TopicSection({
                   key={item.id}
                   item={item}
                   isFaculty={isFaculty}
+                  courseId={courseId}
+                  summary={submissionSummaries[item.id]}
                   topics={allTopics}
                   onOpen={() => onOpenItem(item)}
                   onEdit={() => onEditItem(item)}
