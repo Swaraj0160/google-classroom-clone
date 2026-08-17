@@ -2,14 +2,48 @@ import { NextRequest, NextResponse } from "next/server";
 import { Readable } from "stream";
 import { createSupabaseRouteClient } from "@/lib/server/supabaseServer";
 import { authorizeFileAccess } from "@/lib/server/fileAuthorization";
-import { getFileMeta, downloadFileStream } from "@/lib/server/googleDrive";
+import { getFileMeta, downloadFileStream, classifyDriveError, sanitizeDriveError } from "@/lib/server/googleDrive";
+
+const CATEGORY_RESPONSE: Record<string, { status: number; message: string }> = {
+  INVALID_FILE_ID: { status: 400, message: "Invalid file reference." },
+  LEGACY_STORAGE_PATH: {
+    status: 400,
+    message: "This file reference is not Drive-backed and can't be served by this route.",
+  },
+  DRIVE_FILE_NOT_FOUND: { status: 404, message: "This file could not be found in storage." },
+  DRIVE_PERMISSION_DENIED: {
+    status: 503,
+    message: "File storage access was denied. Please contact your administrator.",
+  },
+  DRIVE_AUTH_FAILED: {
+    status: 503,
+    message: "File storage is temporarily unavailable. Please contact your administrator.",
+  },
+  DRIVE_DOWNLOAD_FAILED: { status: 502, message: "File could not be retrieved. Please try again." },
+  UNEXPECTED_ERROR: { status: 500, message: "File could not be retrieved. Please try again." },
+};
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ fileId: string }> }
 ) {
+  const { fileId } = await params;
+
+  // Defensive input validation — this route only ever serves Drive file ids
+  // (no "/"); a legacy Supabase Storage path or an empty/malformed value
+  // must never be handed to the Drive API and misreported as "not found".
+  if (!fileId || typeof fileId !== "string") {
+    console.error("[api/files/view] category=INVALID_FILE_ID", { fileId });
+    const r = CATEGORY_RESPONSE.INVALID_FILE_ID;
+    return NextResponse.json({ error: r.message }, { status: r.status });
+  }
+  if (fileId.includes("/")) {
+    console.error("[api/files/view] category=LEGACY_STORAGE_PATH", { fileId });
+    const r = CATEGORY_RESPONSE.LEGACY_STORAGE_PATH;
+    return NextResponse.json({ error: r.message }, { status: r.status });
+  }
+
   try {
-    const { fileId } = await params;
     const supabase = createSupabaseRouteClient(request);
     const {
       data: { user },
@@ -19,7 +53,20 @@ export async function GET(
     const authorized = await authorizeFileAccess(supabase, fileId, user.id, "read");
     if (!authorized) return NextResponse.json({ error: "Not authorized." }, { status: 403 });
 
-    const [meta, stream] = await Promise.all([getFileMeta(fileId), downloadFileStream(fileId)]);
+    let meta, stream;
+    try {
+      [meta, stream] = await Promise.all([getFileMeta(fileId), downloadFileStream(fileId)]);
+    } catch (driveErr) {
+      const category = classifyDriveError(driveErr);
+      console.error(
+        "[api/files/view] category=" + category,
+        { fileId },
+        sanitizeDriveError(driveErr)
+      );
+      const r = CATEGORY_RESPONSE[category];
+      return NextResponse.json({ error: r.message }, { status: r.status });
+    }
+
     const webStream = Readable.toWeb(stream as Readable) as ReadableStream;
 
     return new NextResponse(webStream, {
@@ -30,7 +77,8 @@ export async function GET(
       },
     });
   } catch (err) {
-    console.error("[api/files/view]", err instanceof Error ? err.message : err);
-    return NextResponse.json({ error: "File not found or unavailable." }, { status: 404 });
+    console.error("[api/files/view] category=UNEXPECTED_ERROR", { fileId }, err instanceof Error ? err.message : err);
+    const r = CATEGORY_RESPONSE.UNEXPECTED_ERROR;
+    return NextResponse.json({ error: r.message }, { status: r.status });
   }
 }

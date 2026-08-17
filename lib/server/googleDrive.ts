@@ -9,18 +9,57 @@ import { Readable } from "stream";
  * client secret even though the raw error object technically has them
  * attached to internal request config.
  */
-function sanitizeDriveError(err: unknown): { code?: number | string; message?: string; reason?: string } {
+export function sanitizeDriveError(err: unknown): {
+  code?: number | string;
+  message?: string;
+  reason?: string;
+} {
   const e = err as {
     code?: number | string;
     message?: string;
     errors?: { reason?: string; message?: string }[];
-    response?: { status?: number; data?: { error?: { message?: string; status?: string } } };
+    response?: {
+      status?: number;
+      data?: {
+        error?: string | { message?: string; status?: string };
+        error_description?: string;
+      };
+    };
   };
+  const responseData = e?.response?.data;
+  // Two different shapes come out of googleapis: Drive API errors nest under
+  // response.data.error.{message,status}; OAuth token-refresh errors (e.g.
+  // invalid_grant) put a flat string in response.data.error plus
+  // response.data.error_description — handle both without ever touching
+  // request/auth headers (so this can never leak the refresh token/secret).
+  const nestedError = typeof responseData?.error === "object" ? responseData.error : undefined;
+  const flatError = typeof responseData?.error === "string" ? responseData.error : undefined;
+
   return {
     code: e?.code ?? e?.response?.status,
-    message: e?.response?.data?.error?.message ?? e?.message,
-    reason: e?.errors?.[0]?.reason ?? e?.response?.data?.error?.status,
+    message: nestedError?.message ?? responseData?.error_description ?? e?.message,
+    reason: e?.errors?.[0]?.reason ?? nestedError?.status ?? flatError,
   };
+}
+
+export type DriveErrorCategory =
+  | "DRIVE_FILE_NOT_FOUND"
+  | "DRIVE_PERMISSION_DENIED"
+  | "DRIVE_AUTH_FAILED"
+  | "DRIVE_DOWNLOAD_FAILED";
+
+/**
+ * Buckets a Drive/OAuth error into one of the categories callers (currently
+ * app/api/files/view/[fileId]/route.ts) use to pick a response that doesn't
+ * lie to the user — an expired/revoked refresh token must never be reported
+ * as "file not found", since the file may be perfectly fine.
+ */
+export function classifyDriveError(err: unknown): DriveErrorCategory {
+  const info = sanitizeDriveError(err);
+  if (info.reason === "invalid_grant" || info.code === 401) return "DRIVE_AUTH_FAILED";
+  if (info.code === 404) return "DRIVE_FILE_NOT_FOUND";
+  if (info.code === 403) return "DRIVE_PERMISSION_DENIED";
+  return "DRIVE_DOWNLOAD_FAILED";
 }
 
 /**
@@ -192,24 +231,34 @@ export interface DriveFileMeta {
 
 export async function getFileMeta(fileId: string): Promise<DriveFileMeta> {
   const drive = getDriveClient();
-  const res = await drive.files.get({
-    fileId,
-    fields: "name, mimeType",
-    supportsAllDrives: true,
-  });
-  return {
-    name: res.data.name ?? "file",
-    mimeType: res.data.mimeType ?? "application/octet-stream",
-  };
+  try {
+    const res = await drive.files.get({
+      fileId,
+      fields: "name, mimeType",
+      supportsAllDrives: true,
+    });
+    return {
+      name: res.data.name ?? "file",
+      mimeType: res.data.mimeType ?? "application/octet-stream",
+    };
+  } catch (err) {
+    console.error("[googleDrive] stage=get_meta_failed", { fileId }, sanitizeDriveError(err));
+    throw err;
+  }
 }
 
 export async function downloadFileStream(fileId: string): Promise<NodeJS.ReadableStream> {
   const drive = getDriveClient();
-  const res = await drive.files.get(
-    { fileId, alt: "media", supportsAllDrives: true },
-    { responseType: "stream" }
-  );
-  return res.data as unknown as NodeJS.ReadableStream;
+  try {
+    const res = await drive.files.get(
+      { fileId, alt: "media", supportsAllDrives: true },
+      { responseType: "stream" }
+    );
+    return res.data as unknown as NodeJS.ReadableStream;
+  } catch (err) {
+    console.error("[googleDrive] stage=download_failed", { fileId }, sanitizeDriveError(err));
+    throw err;
+  }
 }
 
 export async function deleteFile(fileId: string): Promise<void> {

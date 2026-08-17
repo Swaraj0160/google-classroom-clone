@@ -21,24 +21,52 @@ function isPdf(type: string | null): boolean {
 export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const previewable = isImage(file.file_type) || isPdf(file.file_type);
 
   useEffect(() => {
     let cancelled = false;
+    let objectUrl: string | null = null;
     setUrl(null);
     setError(null);
 
     getSubmissionFileUrl(file.file_path)
-      .then((u) => {
-        if (!cancelled) setUrl(u);
+      .then(async (resolvedUrl) => {
+        if (!previewable) {
+          // Nothing is rendered from this URL for non-previewable types —
+          // the fallback panel only offers a Download button.
+          if (!cancelled) setUrl(resolvedUrl);
+          return;
+        }
+
+        // Fetch the bytes ourselves rather than pointing <img>/<iframe>
+        // straight at the route: a failure (expired Drive credentials,
+        // file genuinely missing, etc.) returns a JSON error body which,
+        // if used directly as a src, would silently render as a broken
+        // image or raw JSON text inside the iframe instead of a real
+        // error message.
+        const res = await fetch(resolvedUrl);
+        if (cancelled) return;
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          setError(body?.error ?? "Could not load this file.");
+          return;
+        }
+
+        const blob = await res.blob();
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
       })
-      .catch(() => {
-        if (!cancelled) setError("Could not load this file.");
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load this file.");
       });
 
     return () => {
       cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [file.file_path]);
+  }, [file.file_path, previewable]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -51,12 +79,10 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
   async function handleDownload() {
     try {
       await downloadSubmissionFile(file.file_path, file.file_name);
-    } catch {
-      showToast.error("Download failed.");
+    } catch (err) {
+      showToast.error(err instanceof Error ? err.message : "Download failed.");
     }
   }
-
-  const previewable = isImage(file.file_type) || isPdf(file.file_type);
 
   return (
     <div
