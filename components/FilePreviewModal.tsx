@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X, Download, Loader2, AlertCircle } from "lucide-react";
+import { X, Download, Loader2, AlertCircle, FileWarning } from "lucide-react";
 import type { SubmissionFile } from "@/types/submission";
 import { getSubmissionFileUrl, downloadSubmissionFile } from "@/lib/submission-storage";
 import { showToast } from "@/lib/toast";
@@ -11,33 +11,53 @@ interface FilePreviewModalProps {
   onClose: () => void;
 }
 
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const DOC_MIME = "application/msword";
+
 function isImage(type: string | null): boolean {
   return !!type && type.startsWith("image/");
 }
 function isPdf(type: string | null): boolean {
   return type === "application/pdf";
 }
+function isDocx(type: string | null): boolean {
+  return type === DOCX_MIME;
+}
+function isLegacyDoc(type: string | null): boolean {
+  return type === DOC_MIME;
+}
+
+type RenderKind = "image" | "pdf" | "docx" | "legacy-doc" | "unsupported";
+
+function renderKindFor(type: string | null): RenderKind {
+  if (isImage(type)) return "image";
+  if (isPdf(type)) return "pdf";
+  if (isDocx(type)) return "docx";
+  if (isLegacyDoc(type)) return "legacy-doc";
+  return "unsupported";
+}
 
 export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
   const [url, setUrl] = useState<string | null>(null);
+  const [docxHtml, setDocxHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const previewable = isImage(file.file_type) || isPdf(file.file_type);
+  const kind = renderKindFor(file.file_type);
+  // "legacy-doc" is a known, permanent limitation (no reliable in-browser
+  // renderer for the old binary .doc format) — nothing to fetch, just show
+  // the explanation immediately.
+  const fetchesBytes = kind === "image" || kind === "pdf" || kind === "docx";
 
   useEffect(() => {
     let cancelled = false;
     let objectUrl: string | null = null;
     setUrl(null);
+    setDocxHtml(null);
     setError(null);
+
+    if (!fetchesBytes) return;
 
     getSubmissionFileUrl(file.file_path)
       .then(async (resolvedUrl) => {
-        if (!previewable) {
-          // Nothing is rendered from this URL for non-previewable types —
-          // the fallback panel only offers a Download button.
-          if (!cancelled) setUrl(resolvedUrl);
-          return;
-        }
-
         // Fetch the bytes ourselves rather than pointing <img>/<iframe>
         // straight at the route: a failure (expired Drive credentials,
         // file genuinely missing, etc.) returns a JSON error body which,
@@ -53,20 +73,36 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
           return;
         }
 
+        if (kind === "docx") {
+          const arrayBuffer = await res.arrayBuffer();
+          if (cancelled) return;
+          const mammoth = await import("mammoth");
+          const result = await mammoth.convertToHtml({ arrayBuffer });
+          if (cancelled) return;
+          setDocxHtml(result.value);
+          return;
+        }
+
         const blob = await res.blob();
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
         setUrl(objectUrl);
       })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load this file.");
+      .catch(() => {
+        if (!cancelled) {
+          setError(
+            kind === "docx"
+              ? "Couldn't render a preview of this document. It may be corrupted or use unsupported formatting."
+              : "Could not load this file."
+          );
+        }
       });
 
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [file.file_path, previewable]);
+  }, [file.file_path, kind, fetchesBytes]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -83,6 +119,8 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
       showToast.error(err instanceof Error ? err.message : "Download failed.");
     }
   }
+
+  const loading = fetchesBytes && !error && !url && !docxHtml;
 
   return (
     <div
@@ -122,8 +160,10 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
               {error}
             </div>
           )}
-          {!error && !url && <Loader2 className="animate-spin text-ink-faint" size={24} />}
-          {!error && url && !previewable && (
+
+          {!error && loading && <Loader2 className="animate-spin text-ink-faint" size={24} />}
+
+          {!error && kind === "unsupported" && (
             <div className="flex flex-col items-center gap-3 p-8 text-center text-sm text-ink-faint">
               <p>Preview isn&apos;t available for this file type.</p>
               <button
@@ -134,12 +174,45 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
               </button>
             </div>
           )}
-          {!error && url && isImage(file.file_type) && (
+
+          {!error && kind === "legacy-doc" && (
+            <div className="flex flex-col items-center gap-3 p-8 text-center text-sm text-ink-faint">
+              <FileWarning size={22} />
+              <p>
+                Preview isn&apos;t available for legacy .doc files.
+                <br />
+                Download to view it in Word or a compatible app.
+              </p>
+              <button
+                onClick={handleDownload}
+                className="flex items-center gap-1.5 rounded-full bg-brand-blue px-4 py-2 text-xs font-semibold text-white"
+              >
+                <Download size={14} /> Download to view
+              </button>
+            </div>
+          )}
+
+          {!error && url && kind === "image" && (
             // eslint-disable-next-line @next/next/no-img-element -- authenticated, short-lived API route, not a static asset
             <img src={url} alt={file.file_name} className="max-h-[75vh] max-w-full object-contain" />
           )}
-          {!error && url && isPdf(file.file_type) && (
+
+          {!error && url && kind === "pdf" && (
             <iframe src={url} title={file.file_name} className="h-[75vh] w-full border-0" />
+          )}
+
+          {!error && docxHtml && kind === "docx" && (
+            <div className="h-[75vh] w-full overflow-y-auto bg-white p-8 dark:bg-gray-100">
+              <div
+                className="docx-preview mx-auto max-w-3xl text-sm leading-relaxed text-gray-900"
+                // mammoth's output is generated client-side from the file's
+                // own bytes (fetched via the existing authorized Drive
+                // route) — not user-supplied HTML from a form, and never
+                // sent anywhere; rendered the same way a PDF/image preview
+                // would be.
+                dangerouslySetInnerHTML={{ __html: docxHtml }}
+              />
+            </div>
           )}
         </div>
       </div>

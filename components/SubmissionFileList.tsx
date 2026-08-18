@@ -22,8 +22,14 @@ import {
 import { showToast } from "@/lib/toast";
 import { FilePreviewModal } from "@/components/FilePreviewModal";
 
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const DOC_MIME = "application/msword";
+
 function isInAppPreviewable(type: string | null) {
-  return !!type && (type === "application/pdf" || type.startsWith("image/"));
+  return (
+    !!type &&
+    (type === "application/pdf" || type.startsWith("image/") || type === DOCX_MIME || type === DOC_MIME)
+  );
 }
 
 interface SubmissionFileListProps {
@@ -55,7 +61,9 @@ function isPreviewable(type: string | null) {
     type.includes("pdf") ||
     type.includes("image") ||
     type.includes("video") ||
-    type.startsWith("text/")
+    type.startsWith("text/") ||
+    type === DOCX_MIME ||
+    type === DOC_MIME
   );
 }
 
