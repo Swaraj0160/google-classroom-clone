@@ -194,18 +194,23 @@ export function AssignmentCard({
 
       {showSubmissionsAction && (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-gray-700/60">
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            {summary ? (
-              <>
-                <span className="font-medium text-gray-700 dark:text-gray-300">
-                  {summary.submitted} / {summary.enrolled} submitted
+          {summary ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
+              <span className="font-medium text-gray-700 dark:text-gray-300">
+                {summary.submitted} / {summary.enrolled} submitted
+              </span>
+              <span>
+                {summary.graded} / {summary.submitted} graded
+              </span>
+              {summary.pendingReview > 0 && (
+                <span className="font-medium text-amber-600 dark:text-amber-400">
+                  {summary.pendingReview} pending review
                 </span>
-                {summary.late > 0 && ` · ${summary.late} late`}
-              </>
-            ) : (
-              <span className="inline-block h-3.5 w-32 animate-pulse rounded bg-gray-100 dark:bg-gray-700" />
-            )}
-          </p>
+              )}
+            </div>
+          ) : (
+            <span className="inline-block h-3.5 w-40 animate-pulse rounded bg-gray-100 dark:bg-gray-700" />
+          )}
 
           <Link
             href={`/dashboard/classes/${courseId}/assignment/${item.id}`}

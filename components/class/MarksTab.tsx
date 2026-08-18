@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { compareByRollNumber } from "@/lib/format";
 import { exportMarksToExcel, exportMarksToPdf, type MarksExportRow } from "@/lib/export";
 import { showToast } from "@/lib/toast";
+import { calculateSubmissionGrade } from "@/lib/grading";
 
 interface MarksTabProps {
   courseId: string;
@@ -204,6 +205,35 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
     return map;
   }, [students, assignments, submissionByKey]);
 
+  const classSummary = useMemo(() => {
+    let graded = 0;
+    let pendingReview = 0;
+    const percentages: number[] = [];
+
+    submissions.forEach((s) => {
+      const turnedIn = s.status !== "pending" && !!s.submitted_at;
+      if (!turnedIn) return;
+      if (s.status === "graded" && s.marks !== null) {
+        graded++;
+        const assignment = assignments.find((a) => a.id === s.assignment_id);
+        const total = assignment?.total_marks ?? 0;
+        if (total > 0) percentages.push((Number(s.marks) / total) * 100);
+      } else {
+        pendingReview++;
+      }
+    });
+
+    return {
+      totalStudents: students.length,
+      totalAssignments: assignments.length,
+      graded,
+      pendingReview,
+      classAverage: percentages.length
+        ? Math.round(percentages.reduce((a, b) => a + b, 0) / percentages.length)
+        : null,
+    };
+  }, [submissions, assignments, students]);
+
   function buildExportRows(): MarksExportRow[] {
     const rows: MarksExportRow[] = [];
     students.forEach((student) => {
@@ -294,6 +324,20 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
         </div>
       </div>
 
+      {assignments.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <MarksSummaryTile label="Total Students" value={classSummary.totalStudents} />
+          <MarksSummaryTile label="Assignments" value={classSummary.totalAssignments} />
+          <MarksSummaryTile label="Graded" value={classSummary.graded} tone="green" />
+          <MarksSummaryTile label="Pending Review" value={classSummary.pendingReview} tone="amber" />
+          <MarksSummaryTile
+            label="Class Average"
+            value={classSummary.classAverage !== null ? `${classSummary.classAverage}%` : "—"}
+            tone="purple"
+          />
+        </div>
+      )}
+
       {assignments.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-black/10 bg-white py-20 text-center dark:border-white/10 dark:bg-surface-darkAlt">
           <p className="text-sm font-medium text-ink-faint">
@@ -339,23 +383,45 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
                     </td>
                     {assignments.map((a) => {
                       const submission = submissionByKey.get(`${student.id}:${a.id}`);
+                      const turnedIn = !!submission && submission.status !== "pending" && !!submission.submitted_at;
+                      const isGraded = submission?.status === "graded" && submission.marks !== null;
+
+                      if (isGraded) {
+                        return (
+                          <td key={a.id} className="px-4 py-3 text-center">
+                            <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-brand-green dark:bg-green-500/10">
+                              {submission!.marks}/{a.total_marks}
+                            </span>
+                          </td>
+                        );
+                      }
+
+                      if (turnedIn) {
+                        // Marks are ONLY ever the officially awarded value —
+                        // never the submission-status word, and never the
+                        // automatic suggestion presented as if it were real.
+                        const { suggestedMarks } = calculateSubmissionGrade({
+                          dueAt: a.due_date,
+                          submittedAt: submission!.submitted_at,
+                          maxMarks: a.total_marks,
+                        });
+                        return (
+                          <td key={a.id} className="px-4 py-3 text-center">
+                            <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
+                              Not Graded
+                            </span>
+                            {suggestedMarks !== null && (
+                              <p className="mt-1 text-[10px] text-ink-faint">
+                                Suggested {suggestedMarks}/{a.total_marks}
+                              </p>
+                            )}
+                          </td>
+                        );
+                      }
+
                       return (
                         <td key={a.id} className="px-4 py-3 text-center">
-                          {submission?.status === "graded" && submission.marks !== null ? (
-                            <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-brand-green dark:bg-green-500/10">
-                              {submission.marks}/{a.total_marks}
-                            </span>
-                          ) : submission?.status === "late" ? (
-                            <span className="rounded-full bg-red-50 px-3 py-1 text-xs font-medium text-brand-red dark:bg-red-500/10">
-                              Late
-                            </span>
-                          ) : submission?.status === "submitted" ? (
-                            <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-brand-blue dark:bg-blue-500/10">
-                              Submitted
-                            </span>
-                          ) : (
-                            <span className="text-xs text-ink-faint">—</span>
-                          )}
+                          <span className="text-xs text-ink-faint">—</span>
                         </td>
                       );
                     })}
@@ -399,6 +465,29 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function MarksSummaryTile({
+  label,
+  value,
+  tone = "gray",
+}: {
+  label: string;
+  value: number | string;
+  tone?: "gray" | "green" | "amber" | "purple";
+}) {
+  const tones: Record<string, string> = {
+    gray: "bg-surface-alt text-ink dark:bg-white/5 dark:text-white",
+    green: "bg-green-50 text-brand-green dark:bg-green-500/10",
+    amber: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",
+    purple: "bg-purple-50 text-brand-purple dark:bg-purple-500/10",
+  };
+  return (
+    <div className={`rounded-xl p-3 text-center ${tones[tone]}`}>
+      <p className="text-xl font-bold">{value}</p>
+      <p className="text-[11px] font-medium opacity-80">{label}</p>
     </div>
   );
 }

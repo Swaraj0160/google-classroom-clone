@@ -139,6 +139,26 @@ export function describeSubmissionStatus(
 }
 
 /**
+ * Grade lifecycle — deliberately separate from SubmissionDisplayStatus
+ * (which is about timing/lateness). A submission existing, or even being
+ * on time, says nothing about whether it has been awarded an official
+ * mark: that only happens when a faculty member explicitly saves/accepts
+ * a grade (submissions.status becomes "graded" and marks is non-null).
+ */
+export type GradeStatus = "not_graded" | "graded";
+
+export function describeGradeStatus(hasSubmission: boolean, isGraded: boolean): GradeStatus {
+  return hasSubmission && isGraded ? "graded" : "not_graded";
+}
+
+/** Human-readable reason shown next to a suggested grade, e.g. "Submitted 1 day 5 hours late". */
+export function describeSuggestionReason(timingCategory: TimingCategory | null, lateByMs: number | null): string {
+  if (timingCategory === "on_time" || timingCategory === null) return "Submitted on time";
+  const lateness = formatLateness(lateByMs);
+  return lateness ? lateness.replace(/^Late by /, "Submitted ") + " late" : "Submitted late";
+}
+
+/**
  * The submissions.status transition used whenever a faculty member sets or
  * clears manual marks — same rule the existing grading page
  * (app/dashboard/submissions/[id]/page.tsx) already applies, extracted here

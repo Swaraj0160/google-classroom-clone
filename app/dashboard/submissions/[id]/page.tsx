@@ -8,7 +8,12 @@ import { SubmissionFileList } from "@/components/SubmissionFileList";
 import { AttachmentPreview } from "@/components/classwork/AttachmentPreview";
 import type { SubmissionFile } from "@/types/submission";
 import type { AssignmentAttachment } from "@/types/classwork";
-import { deriveStatusAfterManualGrade } from "@/lib/grading";
+import {
+  calculateSubmissionGrade,
+  deriveStatusAfterManualGrade,
+  describeSuggestionReason,
+  formatLateness,
+} from "@/lib/grading";
 
 interface AssignmentRow {
   id: string;
@@ -28,6 +33,7 @@ interface SubmissionRow {
   marks: number | null;
   feedback: string | null;
   submitted_at: string | null;
+  updated_at?: string;
 }
 
 interface StudentRow {
@@ -48,6 +54,7 @@ export default function SubmissionReviewPage() {
 
   const [submission, setSubmission] = useState<SubmissionRow | null>(null);
   const [assignment, setAssignment] = useState<AssignmentRow | null>(null);
+  const [courseTitle, setCourseTitle] = useState<string | null>(null);
   const [student, setStudent] = useState<StudentRow | null>(null);
   const [submissionFiles, setSubmissionFiles] = useState<SubmissionFile[]>([]);
   const [assignmentAttachments, setAssignmentAttachments] = useState<AssignmentAttachment[]>([]);
@@ -63,7 +70,7 @@ export default function SubmissionReviewPage() {
 
       const { data: submissionData, error: submissionError } = await supabase
         .from("submissions")
-        .select("id, assignment_id, student_id, status, marks, feedback, submitted_at")
+        .select("id, assignment_id, student_id, status, marks, feedback, submitted_at, updated_at")
         .eq("id", submissionId)
         .maybeSingle();
 
@@ -83,7 +90,15 @@ export default function SubmissionReviewPage() {
         .eq("id", submissionData.assignment_id)
         .maybeSingle();
 
-      if (assignmentData) setAssignment(assignmentData);
+      if (assignmentData) {
+        setAssignment(assignmentData);
+        const { data: courseData } = await supabase
+          .from("courses")
+          .select("title")
+          .eq("id", assignmentData.course_id)
+          .maybeSingle();
+        setCourseTitle(courseData?.title ?? null);
+      }
 
       const { data: studentData, error: studentError } = await supabase
         .from("profiles")
@@ -131,26 +146,23 @@ export default function SubmissionReviewPage() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const handleSave = async () => {
+  const persistGrade = async (marksOverride: number | null, successMessage: string) => {
     if (!submission) return;
     setSaving(true);
     setError(null);
 
-    const parsedMarks = marksInput.trim() === "" ? null : Number(marksInput);
-
-    if (parsedMarks !== null && Number.isNaN(parsedMarks)) {
-      setError("Marks must be a valid number.");
+    if (
+      marksOverride !== null &&
+      assignment?.total_marks !== null &&
+      assignment?.total_marks !== undefined &&
+      marksOverride > assignment.total_marks
+    ) {
+      setError(`Marks cannot exceed total marks (${assignment.total_marks}).`);
       setSaving(false);
       return;
     }
-
-    if (
-      parsedMarks !== null &&
-      assignment?.total_marks !== null &&
-      assignment?.total_marks !== undefined &&
-      parsedMarks > assignment.total_marks
-    ) {
-      setError(`Marks cannot exceed total marks (${assignment.total_marks}).`);
+    if (marksOverride !== null && marksOverride < 0) {
+      setError("Marks cannot be negative.");
       setSaving(false);
       return;
     }
@@ -159,17 +171,17 @@ export default function SubmissionReviewPage() {
       !!submission.submitted_at &&
       !!assignment?.due_date &&
       new Date(submission.submitted_at) > new Date(assignment.due_date);
-    const newStatus = deriveStatusAfterManualGrade(submission.status, wasLate, parsedMarks);
+    const newStatus = deriveStatusAfterManualGrade(submission.status, wasLate, marksOverride);
 
     const { data, error: updateError } = await supabase
       .from("submissions")
       .update({
-        marks: parsedMarks,
+        marks: marksOverride,
         feedback: feedbackInput.trim() === "" ? null : feedbackInput,
         status: newStatus,
       })
       .eq("id", submission.id)
-      .select("id, assignment_id, student_id, status, marks, feedback, submitted_at")
+      .select("id, assignment_id, student_id, status, marks, feedback, submitted_at, updated_at")
       .maybeSingle();
 
     if (updateError || !data) {
@@ -179,8 +191,28 @@ export default function SubmissionReviewPage() {
     }
 
     setSubmission(data);
+    setMarksInput(marksOverride !== null ? String(marksOverride) : "");
     setSaving(false);
-    setToast("Changes saved successfully.");
+    setToast(successMessage);
+  };
+
+  const handleSave = () => {
+    const trimmed = marksInput.trim();
+    const parsedMarks = trimmed === "" ? null : Number(trimmed);
+    if (trimmed !== "" && Number.isNaN(parsedMarks as number)) {
+      setError("Marks must be a valid number.");
+      return;
+    }
+    void persistGrade(parsedMarks, "Changes saved successfully.");
+  };
+
+  const handleAcceptSuggested = () => {
+    if (suggestedMarks === null) return;
+    void persistGrade(suggestedMarks, `Accepted — awarded ${suggestedMarks}${assignment?.total_marks !== null ? `/${assignment?.total_marks}` : ""}.`);
+  };
+
+  const handleReturn = () => {
+    void persistGrade(null, "Returned for review — no official grade is recorded.");
   };
 
   const scorePercent =
@@ -189,6 +221,15 @@ export default function SubmissionReviewPage() {
     assignment?.total_marks
       ? Math.round((Number(submission.marks) / assignment.total_marks) * 100)
       : null;
+
+  const isGraded = submission?.status === "graded" && submission?.marks !== null;
+  const { suggestedMarks, timingCategory, lateByMs } = calculateSubmissionGrade({
+    dueAt: assignment?.due_date ?? null,
+    submittedAt: submission?.submitted_at ?? null,
+    maxMarks: assignment?.total_marks ?? null,
+  });
+  const suggestionReason = describeSuggestionReason(timingCategory, lateByMs);
+  const latenessLabel = formatLateness(lateByMs);
 
   if (loading) {
     return (
@@ -228,6 +269,7 @@ export default function SubmissionReviewPage() {
         <p className="mt-1 text-sm text-ink-soft dark:text-gray-400">
           Reviewing submission from {student?.full_name || student?.email || "Unknown Student"}
           {student?.roll_number ? ` (${student.roll_number})` : ""}
+          {courseTitle ? ` · ${courseTitle}` : ""}
         </p>
       </div>
 
@@ -308,6 +350,12 @@ export default function SubmissionReviewPage() {
                   </span>
                 )}
               </div>
+              {courseTitle && (
+                <div className="flex items-center justify-between">
+                  <span className="text-ink-faint">Class</span>
+                  <span className="font-medium text-ink dark:text-white">{courseTitle}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span className="text-ink-faint">Submitted</span>
                 <span className="font-medium text-ink dark:text-white">
@@ -322,6 +370,31 @@ export default function SubmissionReviewPage() {
                     : "—"}
                 </span>
               </div>
+              <div className="flex items-center justify-between">
+                <span className="text-ink-faint">Due</span>
+                <span className="font-medium text-ink dark:text-white">
+                  {assignment?.due_date
+                    ? new Date(assignment.due_date).toLocaleString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })
+                    : "—"}
+                </span>
+              </div>
+              {latenessLabel ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-ink-faint">Lateness</span>
+                  <span className="font-medium text-amber-600 dark:text-amber-400">{latenessLabel}</span>
+                </div>
+              ) : submission?.submitted_at ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-ink-faint">Lateness</span>
+                  <span className="font-medium text-green-600 dark:text-green-400">Submitted on time</span>
+                </div>
+              ) : null}
               <div className="flex items-center justify-between">
                 <span className="text-ink-faint">Total Marks</span>
                 <span className="font-medium text-ink dark:text-white">
@@ -338,13 +411,44 @@ export default function SubmissionReviewPage() {
           </div>
 
           <div className="rounded-2xl border border-black/5 bg-white p-5 shadow-card dark:border-white/5 dark:bg-surface-darkAlt">
-            <h3 className="mb-3 text-sm font-semibold text-ink dark:text-white">
-              Grade Submission
-            </h3>
+            <h3 className="mb-3 text-sm font-semibold text-ink dark:text-white">Grading</h3>
+
+            {isGraded ? (
+              <div className="mb-4 flex items-center gap-2 rounded-xl bg-green-50 px-3.5 py-2.5 dark:bg-green-900/20">
+                <CheckCircle2 size={16} className="shrink-0 text-green-600 dark:text-green-400" />
+                <p className="text-sm text-green-800 dark:text-green-300">
+                  <span className="font-semibold">
+                    Graded: {submission?.marks}
+                    {assignment?.total_marks !== null ? `/${assignment?.total_marks}` : ""}
+                  </span>{" "}
+                  · Graded by Faculty
+                  {submission?.updated_at
+                    ? ` · ${new Date(submission.updated_at).toLocaleString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}`
+                    : ""}
+                </p>
+              </div>
+            ) : (
+              <div className="mb-4 rounded-xl bg-surface-alt px-3.5 py-2.5 dark:bg-white/5">
+                <p className="text-xs text-ink-faint">Suggested grade</p>
+                <p className="text-sm font-semibold text-ink dark:text-white">
+                  {suggestedMarks !== null
+                    ? `${suggestedMarks}${assignment?.total_marks !== null ? ` / ${assignment?.total_marks}` : ""}`
+                    : "—"}
+                </p>
+                <p className="text-xs text-ink-faint">Reason: {suggestionReason}</p>
+              </div>
+            )}
+
             <div className="space-y-4">
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-ink-faint">
-                  Marks {assignment?.total_marks ? `(out of ${assignment.total_marks})` : ""}
+                  Awarded grade {assignment?.total_marks ? `(out of ${assignment.total_marks})` : ""}
                 </label>
                 <input
                   type="number"
@@ -366,14 +470,32 @@ export default function SubmissionReviewPage() {
                   className="w-full resize-none rounded-xl border border-black/10 bg-white px-4 py-2.5 text-sm outline-none focus:border-brand-blue dark:border-white/10 dark:bg-surface-dark"
                 />
               </div>
+              {suggestedMarks !== null && !isGraded && (
+                <button
+                  onClick={handleAcceptSuggested}
+                  disabled={saving}
+                  className="flex w-full items-center justify-center gap-2 rounded-full bg-green-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-60"
+                >
+                  Accept &amp; Award Suggested Grade
+                </button>
+              )}
               <button
                 onClick={handleSave}
                 disabled={saving}
                 className="flex w-full items-center justify-center gap-2 rounded-full bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-60"
               >
                 {saving && <Loader2 size={15} className="animate-spin" />}
-                {saving ? "Saving..." : "Save Changes"}
+                {saving ? "Saving..." : "Save Grade"}
               </button>
+              {isGraded && (
+                <button
+                  onClick={handleReturn}
+                  disabled={saving}
+                  className="flex w-full items-center justify-center gap-2 rounded-full border border-black/10 px-4 py-2.5 text-sm font-medium text-ink-soft transition-colors hover:bg-surface-alt disabled:opacity-60 dark:border-white/10 dark:text-gray-300 dark:hover:bg-white/5"
+                >
+                  Return / Needs Revision
+                </button>
+              )}
             </div>
           </div>
         </div>

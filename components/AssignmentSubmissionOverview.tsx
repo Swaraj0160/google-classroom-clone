@@ -23,9 +23,12 @@ import { exportAssignmentGradesToCsv } from "@/lib/export";
 import { showToast } from "@/lib/toast";
 import {
   calculateSubmissionGrade,
+  describeGradeStatus,
   describeSubmissionStatus,
+  describeSuggestionReason,
   formatLateness,
   SUBMISSION_STATUS_LABEL,
+  type GradeStatus,
   type SubmissionDisplayStatus,
 } from "@/lib/grading";
 
@@ -39,13 +42,12 @@ interface AssignmentSubmissionOverviewProps {
 type FilterKey =
   | "all"
   | "submitted"
-  | "on_time"
-  | "late"
+  | "pending_review"
+  | "graded"
   | "not_submitted"
-  | "needs_review"
-  | "reviewed"
+  | "late"
   | "needs_attention";
-type SortKey = "roll" | "name" | "status" | "marks" | "review";
+type SortKey = "roll" | "name" | "time" | "status" | "marks";
 
 const STATUS_STYLES: Record<
   SubmissionDisplayStatus,
@@ -86,15 +88,15 @@ function StatusPill({ status }: { status: SubmissionDisplayStatus }) {
   );
 }
 
-function ReviewPill({ reviewed, hasSubmission }: { reviewed: boolean; hasSubmission: boolean }) {
+function GradeStatusPill({ status, hasSubmission }: { status: GradeStatus; hasSubmission: boolean }) {
   if (!hasSubmission) return <span className="text-xs text-gray-300 dark:text-gray-600">—</span>;
-  return reviewed ? (
+  return status === "graded" ? (
     <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-green-200 bg-green-50 px-2 py-0.5 text-[11px] font-medium text-green-700 dark:border-green-900 dark:bg-green-900/30 dark:text-green-300">
-      <CheckCircle2 size={11} /> Reviewed
+      <CheckCircle2 size={11} /> Graded
     </span>
   ) : (
     <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-900 dark:bg-amber-900/30 dark:text-amber-300">
-      Needs review
+      Pending Review
     </span>
   );
 }
@@ -110,7 +112,8 @@ interface Enriched {
   displayStatus: SubmissionDisplayStatus;
   lateByMs: number | null;
   isGraded: boolean;
-  reviewed: boolean;
+  gradeStatus: GradeStatus;
+  suggestionReason: string;
   automaticMarks: number | null;
   finalMarks: number | null;
   needsAttention: boolean;
@@ -122,8 +125,10 @@ export function AssignmentSubmissionOverview({
   totalMarks,
   dueDate,
 }: AssignmentSubmissionOverviewProps) {
-  const { roster, counts, loading, saveGrade, setReviewed, bulkSetReviewed, bulkApplyGrade } =
-    useAssignmentSubmissions(assignmentId, courseId);
+  const { roster, counts, loading, saveGrade, bulkApplyGrade } = useAssignmentSubmissions(
+    assignmentId,
+    courseId
+  );
 
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -147,14 +152,13 @@ export function AssignmentSubmissionOverview({
       });
       const displayStatus = describeSubmissionStatus(hasSubmission, timingCategory);
       const isGraded = hasSubmission && submission!.status === "graded" && submission!.marks !== null;
-      const reviewed = hasSubmission && !!submission!.reviewed;
+      const gradeStatus = describeGradeStatus(hasSubmission, isGraded);
       const fileCount = submission?.files.length ?? 0;
 
       const needsAttention =
         !hasSubmission ||
         (hasSubmission &&
-          (!reviewed ||
-            !isGraded ||
+          (!isGraded ||
             displayStatus === "late_within_48h" ||
             displayStatus === "late_after_48h" ||
             fileCount === 0));
@@ -165,7 +169,8 @@ export function AssignmentSubmissionOverview({
         displayStatus,
         lateByMs,
         isGraded,
-        reviewed,
+        gradeStatus,
+        suggestionReason: describeSuggestionReason(timingCategory, lateByMs),
         automaticMarks: suggestedMarks,
         finalMarks: isGraded ? submission!.marks : null,
         needsAttention,
@@ -183,7 +188,8 @@ export function AssignmentSubmissionOverview({
     const gradedMarks = enriched.filter((e) => e.isGraded).map((e) => e.finalMarks as number);
     const averageGrade =
       gradedMarks.length > 0 ? gradedMarks.reduce((a, b) => a + b, 0) / gradedMarks.length : null;
-    return { onTime, late, averageGrade, gradedCount: gradedMarks.length };
+    const pendingReview = enriched.filter((e) => e.gradeStatus === "not_graded" && e.hasSubmission).length;
+    return { onTime, late, averageGrade, gradedCount: gradedMarks.length, pendingReview };
   }, [enriched]);
 
   const analytics = useMemo(() => {
@@ -223,14 +229,13 @@ export function AssignmentSubmissionOverview({
   const filtered = useMemo(() => {
     const value = search.trim().toLowerCase();
     return enriched.filter((item) => {
-      const { entry, hasSubmission, displayStatus, reviewed, needsAttention } = item;
+      const { entry, hasSubmission, displayStatus, gradeStatus, needsAttention } = item;
       if (filter === "submitted" && !hasSubmission) return false;
-      if (filter === "on_time" && displayStatus !== "on_time") return false;
+      if (filter === "pending_review" && (!hasSubmission || gradeStatus !== "not_graded")) return false;
+      if (filter === "graded" && gradeStatus !== "graded") return false;
       if (filter === "not_submitted" && hasSubmission) return false;
       if (filter === "late" && displayStatus !== "late_within_48h" && displayStatus !== "late_after_48h")
         return false;
-      if (filter === "needs_review" && (!hasSubmission || reviewed)) return false;
-      if (filter === "reviewed" && (!hasSubmission || !reviewed)) return false;
       if (filter === "needs_attention" && !needsAttention) return false;
 
       if (!value) return true;
@@ -261,8 +266,15 @@ export function AssignmentSubmissionOverview({
       case "marks":
         list.sort((a, b) => (b.finalMarks ?? b.automaticMarks ?? -1) - (a.finalMarks ?? a.automaticMarks ?? -1));
         break;
-      case "review":
-        list.sort((a, b) => Number(a.reviewed) - Number(b.reviewed));
+      case "time":
+        list.sort((a, b) => {
+          const at = a.entry.submission?.submitted_at;
+          const bt = b.entry.submission?.submitted_at;
+          if (!at && !bt) return 0;
+          if (!at) return 1;
+          if (!bt) return -1;
+          return new Date(at).getTime() - new Date(bt).getTime();
+        });
         break;
       case "roll":
       default:
@@ -326,6 +338,38 @@ export function AssignmentSubmissionOverview({
     setSaving(false);
   }
 
+  /** One click: the automatically computed suggestion becomes the official mark, verbatim. */
+  async function handleAcceptSuggested(item: Enriched) {
+    const submission = item.entry.submission;
+    if (!submission || item.automaticMarks === null) return;
+    setSaving(true);
+    const ok = await saveGrade(
+      submission.id,
+      item.automaticMarks,
+      feedbackDraft.trim() === "" ? null : feedbackDraft,
+      dueDate,
+      `Accepted — awarded ${item.automaticMarks}${totalMarks !== null ? `/${totalMarks}` : ""}.`
+    );
+    if (ok) setMarksDraft(String(item.automaticMarks));
+    setSaving(false);
+  }
+
+  /** Clears any awarded mark and reverts to submitted/late — no official grade exists until faculty re-grades. */
+  async function handleReturn(item: Enriched) {
+    const submission = item.entry.submission;
+    if (!submission) return;
+    setSaving(true);
+    const ok = await saveGrade(
+      submission.id,
+      null,
+      feedbackDraft.trim() === "" ? null : feedbackDraft,
+      dueDate,
+      "Returned for review — no official grade is recorded."
+    );
+    if (ok) setMarksDraft("");
+    setSaving(false);
+  }
+
   async function handleBulkApplyGrade() {
     const trimmed = bulkGradeInput.trim();
     const parsed = Number(trimmed);
@@ -344,11 +388,26 @@ export function AssignmentSubmissionOverview({
     setSelected(new Set());
   }
 
-  async function handleBulkReview(reviewed: boolean) {
+  /** Accepts each selected submission's OWN suggested grade — not a single shared value,
+   *  since lateness (and therefore the suggestion) differs per student. */
+  async function handleBulkAcceptSuggested() {
+    const targets = enriched.filter(
+      (e) => e.entry.submission && selected.has(e.entry.submission.id) && e.automaticMarks !== null
+    );
+    if (targets.length === 0) {
+      showToast.error("None of the selected students have a computable suggested grade.");
+      return;
+    }
     setBulkBusy(true);
-    await bulkSetReviewed(Array.from(selected), reviewed);
+    let succeeded = 0;
+    for (const item of targets) {
+      // eslint-disable-next-line no-await-in-loop -- sequential, mirrors bulkApplyGrade's own pattern
+      const ok = await saveGrade(item.entry.submission!.id, item.automaticMarks, null, dueDate, "");
+      if (ok) succeeded++;
+    }
     setBulkBusy(false);
     setSelected(new Set());
+    if (succeeded > 0) showToast.success(`Accepted suggested grades for ${succeeded} student(s).`);
   }
 
   function handleExport() {
@@ -365,7 +424,7 @@ export function AssignmentSubmissionOverview({
         lateStatus: formatLateness(item.lateByMs) ?? (item.hasSubmission ? "On time" : "—"),
         automaticGrade: item.automaticMarks !== null ? String(item.automaticMarks) : "—",
         finalGrade: item.finalMarks !== null ? String(item.finalMarks) : "Not graded",
-        reviewStatus: !item.hasSubmission ? "—" : item.reviewed ? "Reviewed" : "Needs review",
+        reviewStatus: !item.hasSubmission ? "—" : item.gradeStatus === "graded" ? "Graded" : "Pending Review",
         feedback: item.entry.submission?.feedback ?? "",
       })),
       `assignment-grades-${assignmentId}.csv`
@@ -402,11 +461,11 @@ export function AssignmentSubmissionOverview({
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <SummaryTile label="Students" value={counts.enrolled} />
           <SummaryTile label="Submitted" value={counts.turnedIn} tone="blue" />
-          <SummaryTile label="On Time" value={summary.onTime} tone="green" />
-          <SummaryTile label="Late" value={summary.late} tone="amber" />
+          <SummaryTile label="Pending Review" value={summary.pendingReview} tone="amber" />
+          <SummaryTile label="Graded" value={summary.gradedCount} tone="green" />
           <SummaryTile label="Not Submitted" value={counts.missing} tone="red" />
           <SummaryTile
-            label="Avg. Grade"
+            label="Average Grade"
             value={
               summary.averageGrade !== null
                 ? `${summary.averageGrade.toFixed(1)}${totalMarks !== null ? ` / ${totalMarks}` : ""}`
@@ -486,11 +545,10 @@ export function AssignmentSubmissionOverview({
                   [
                     ["all", "All"],
                     ["submitted", "Submitted"],
-                    ["on_time", "On Time"],
-                    ["late", "Late"],
+                    ["pending_review", "Pending Review"],
+                    ["graded", "Graded"],
                     ["not_submitted", "Not Submitted"],
-                    ["needs_review", "Needs Review"],
-                    ["reviewed", "Reviewed"],
+                    ["late", "Late"],
                   ] as [FilterKey, string][]
                 ).map(([key, label]) => (
                   <button
@@ -515,9 +573,9 @@ export function AssignmentSubmissionOverview({
               >
                 <option value="roll">Sort: Roll No.</option>
                 <option value="name">Sort: Name</option>
+                <option value="time">Sort: Submission Time</option>
                 <option value="status">Sort: Status</option>
                 <option value="marks">Sort: Marks</option>
-                <option value="review">Sort: Review status</option>
               </select>
             </div>
           </>
@@ -530,17 +588,10 @@ export function AssignmentSubmissionOverview({
             </span>
             <button
               disabled={bulkBusy}
-              onClick={() => handleBulkReview(true)}
+              onClick={handleBulkAcceptSuggested}
               className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-blue-700 shadow-sm hover:bg-blue-100 disabled:opacity-50 dark:bg-gray-800 dark:text-blue-300"
             >
-              Mark Reviewed
-            </button>
-            <button
-              disabled={bulkBusy}
-              onClick={() => handleBulkReview(false)}
-              className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-blue-700 shadow-sm hover:bg-blue-100 disabled:opacity-50 dark:bg-gray-800 dark:text-blue-300"
-            >
-              Needs Review
+              Accept Suggested Grades
             </button>
             <div className="flex items-center gap-1.5">
               <input
@@ -555,7 +606,7 @@ export function AssignmentSubmissionOverview({
                 onClick={handleBulkApplyGrade}
                 className="rounded-full bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
-                Apply Grade
+                Apply Custom Grade
               </button>
             </div>
             <button
@@ -586,7 +637,8 @@ export function AssignmentSubmissionOverview({
           </div>
         ) : (
           sorted.map((item) => {
-            const { entry, hasSubmission, displayStatus, lateByMs, isGraded, reviewed, automaticMarks, finalMarks } = item;
+            const { entry, hasSubmission, displayStatus, lateByMs, isGraded, gradeStatus, automaticMarks, finalMarks } =
+              item;
             const submission = entry.submission;
             const fileCount = submission?.files.length ?? 0;
             const isExpanded = expandedId === entry.student.id;
@@ -648,14 +700,14 @@ export function AssignmentSubmissionOverview({
                             })
                           : "—"}
                       </span>
-                      <span className="w-24 shrink-0 text-xs text-gray-500 dark:text-gray-400">
+                      <span className="w-28 shrink-0 text-xs text-gray-500 dark:text-gray-400">
                         {isGraded
-                          ? `Final: ${finalMarks}${totalMarks !== null ? `/${totalMarks}` : ""}`
+                          ? `Grade: ${finalMarks}${totalMarks !== null ? `/${totalMarks}` : ""}`
                           : automaticMarks !== null
-                          ? `Auto: ${automaticMarks}${totalMarks !== null ? `/${totalMarks}` : ""}`
+                          ? `Suggested: ${automaticMarks}${totalMarks !== null ? `/${totalMarks}` : ""}`
                           : "—"}
                       </span>
-                      <ReviewPill reviewed={reviewed} hasSubmission={hasSubmission} />
+                      <GradeStatusPill status={gradeStatus} hasSubmission={hasSubmission} />
                       {fileCount > 0 && (
                         <span className="flex shrink-0 items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
                           <Paperclip size={13} />
@@ -710,29 +762,37 @@ export function AssignmentSubmissionOverview({
                         <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
                           Grading
                         </h4>
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                          <div>
-                            <p className="text-[11px] text-gray-400">Automatic grade</p>
+
+                        {isGraded ? (
+                          <div className="mb-3 flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 dark:bg-green-900/20">
+                            <CheckCircle2 size={14} className="shrink-0 text-green-600 dark:text-green-400" />
+                            <p className="text-sm text-green-800 dark:text-green-300">
+                              <span className="font-semibold">
+                                Graded: {finalMarks}
+                                {totalMarks !== null ? `/${totalMarks}` : ""}
+                              </span>{" "}
+                              · Graded by Faculty
+                              {submission?.updated_at
+                                ? ` · ${formatExactDateTime(submission.updated_at)}`
+                                : ""}
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="mb-3">
+                            <p className="text-[11px] text-gray-400">Suggested grade</p>
                             <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">
                               {automaticMarks !== null
                                 ? `${automaticMarks}${totalMarks !== null ? ` / ${totalMarks}` : ""}`
                                 : "—"}
                             </p>
+                            <p className="text-[11px] text-gray-400">Reason: {item.suggestionReason}</p>
                           </div>
-                          <div>
-                            <p className="text-[11px] text-gray-400">Final grade</p>
-                            <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                              {isGraded
-                                ? `${finalMarks}${totalMarks !== null ? ` / ${totalMarks}` : ""}`
-                                : "Not graded"}
-                            </p>
-                          </div>
-                        </div>
+                        )}
 
-                        <div className="mt-3 flex flex-wrap items-end gap-2">
+                        <div className="flex flex-wrap items-end gap-2">
                           <div>
                             <label className="mb-1 block text-[11px] font-medium text-gray-400">
-                              Final grade {totalMarks !== null ? `(out of ${totalMarks})` : ""}
+                              Awarded grade {totalMarks !== null ? `(out of ${totalMarks})` : ""}
                             </label>
                             <input
                               type="number"
@@ -742,13 +802,13 @@ export function AssignmentSubmissionOverview({
                               className="w-24 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-blue-500 dark:border-gray-700 dark:bg-gray-800"
                             />
                           </div>
-                          {automaticMarks !== null && String(automaticMarks) !== marksDraft && (
+                          {automaticMarks !== null && !isGraded && (
                             <button
-                              onClick={() => setMarksDraft(String(automaticMarks))}
-                              className="rounded-full border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                              onClick={() => handleAcceptSuggested(item)}
+                              disabled={saving}
+                              className="rounded-full bg-green-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-60"
                             >
-                              Use {automaticMarks}
-                              {totalMarks !== null ? `/${totalMarks}` : ""}
+                              Accept &amp; Award Suggested Grade
                             </button>
                           )}
                           <button
@@ -758,12 +818,15 @@ export function AssignmentSubmissionOverview({
                           >
                             {saving ? "Saving…" : "Save Grade"}
                           </button>
-                          <button
-                            onClick={() => setReviewed(submission!.id, !reviewed)}
-                            className="rounded-full border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-                          >
-                            {reviewed ? "Mark as Needs Review" : "Mark Reviewed"}
-                          </button>
+                          {isGraded && (
+                            <button
+                              onClick={() => handleReturn(item)}
+                              disabled={saving}
+                              className="rounded-full border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                            >
+                              Return / Needs Revision
+                            </button>
+                          )}
                         </div>
 
                         <div className="mt-3">

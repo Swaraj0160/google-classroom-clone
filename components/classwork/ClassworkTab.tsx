@@ -56,7 +56,9 @@ export function ClassworkTab({ courseId, facultyId }: ClassworkTabProps) {
   // the batched query entirely for students by passing an empty list.
   const { summaries: submissionSummaries } = useCourseSubmissionSummaries(
     courseId,
-    isFaculty ? assignmentsApi.assignments.map((a) => ({ id: a.id, due_date: a.due_date })) : []
+    isFaculty
+      ? assignmentsApi.assignments.map((a) => ({ id: a.id, due_date: a.due_date, total_marks: a.total_marks }))
+      : []
   );
 
   const allItems = useMemo(

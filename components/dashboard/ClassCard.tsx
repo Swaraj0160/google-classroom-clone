@@ -12,7 +12,14 @@ interface Course {
   join_code: string;
 }
 
-export default function ClassCard({ item }: { item: Course }) {
+export interface ClassCardStats {
+  students: number;
+  assignments: number;
+  pendingReviews: number;
+  average: number | null;
+}
+
+export default function ClassCard({ item, stats }: { item: Course; stats?: ClassCardStats }) {
   return (
     <Link
       href={`/dashboard/classes/${item.id}`}
@@ -60,14 +67,40 @@ export default function ClassCard({ item }: { item: Course }) {
           </span>
         </div>
 
-        <div className="mt-4 flex items-center justify-between border-t pt-3">
-          <ClipboardList size={17} />
-          <Folder size={17} />
-
-          <span className="text-xs text-gray-500">
-            {item.join_code}
-          </span>
-        </div>
+        {stats ? (
+          <div className="mt-4 grid grid-cols-2 gap-2 border-t pt-3 text-center dark:border-white/10">
+            <div>
+              <p className="text-sm font-bold text-ink dark:text-white">{stats.students}</p>
+              <p className="text-[10px] text-gray-400">Students</p>
+            </div>
+            <div>
+              <p className="text-sm font-bold text-ink dark:text-white">{stats.assignments}</p>
+              <p className="text-[10px] text-gray-400">Assignments</p>
+            </div>
+            <div>
+              <p
+                className={`text-sm font-bold ${
+                  stats.pendingReviews > 0 ? "text-amber-600 dark:text-amber-400" : "text-ink dark:text-white"
+                }`}
+              >
+                {stats.pendingReviews}
+              </p>
+              <p className="text-[10px] text-gray-400">Pending Reviews</p>
+            </div>
+            <div>
+              <p className="text-sm font-bold text-ink dark:text-white">
+                {stats.average !== null ? `${stats.average}%` : "—"}
+              </p>
+              <p className="text-[10px] text-gray-400">Class Average</p>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 flex items-center justify-between border-t pt-3 dark:border-white/10">
+            <ClipboardList size={17} />
+            <Folder size={17} />
+            <span className="text-xs text-gray-500">{item.join_code}</span>
+          </div>
+        )}
       </div>
     </Link>
   );

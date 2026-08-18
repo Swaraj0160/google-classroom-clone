@@ -25,14 +25,29 @@ interface NavItem {
   badge?: string;
 }
 
-const navItems: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Classes", href: "/dashboard/classes", icon: BookOpen },
-  { label: "Assignments", href: "/dashboard/assignments", icon: ClipboardList },
-  { label: "Submissions", href: "/dashboard/submissions", icon: UploadCloud },
-  { label: "Students", href: "/dashboard/students", icon: Users },
-  { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
-  { label: "AI Insights", href: "/dashboard/ai-insights", icon: Sparkles, badge: "New" },
+interface NavSection {
+  label: string | null;
+  items: NavItem[];
+}
+
+const navSections: NavSection[] = [
+  { label: null, items: [{ label: "Dashboard", href: "/dashboard", icon: LayoutDashboard }] },
+  {
+    label: "Teaching",
+    items: [
+      { label: "Classes", href: "/dashboard/classes", icon: BookOpen },
+      { label: "Assignments", href: "/dashboard/assignments", icon: ClipboardList },
+      { label: "Submissions", href: "/dashboard/submissions", icon: UploadCloud },
+      { label: "Students", href: "/dashboard/students", icon: Users },
+    ],
+  },
+  {
+    label: "Insights",
+    items: [
+      { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
+      { label: "AI Insights", href: "/dashboard/ai-insights", icon: Sparkles, badge: "New" },
+    ],
+  },
 ];
 
 const bottomItems: NavItem[] = [
@@ -81,46 +96,55 @@ export default function Sidebar({
         </div>
 
         {/* Nav */}
-        <nav className="mt-2 flex-1 space-y-1 overflow-y-auto scrollbar-none px-3">
-          {navItems.map((item) => {
-            const active =
-              pathname === item.href ||
-              (item.href !== "/dashboard" && pathname.startsWith(item.href));
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setMobileOpen(false)}
-                className={`group relative flex items-center gap-3 rounded-full px-3.5 py-2.5 text-[14px] font-medium transition-all duration-200
-                ${
-                  active
-                    ? "bg-blue-50 text-brand-blueDark dark:bg-blue-500/15 dark:text-blue-300"
-                    : "text-ink-soft hover:bg-surface-alt dark:text-gray-400 dark:hover:bg-white/5"
-                }
-                ${collapsed ? "justify-center" : ""}
-                `}
-                title={collapsed ? item.label : undefined}
-              >
-                <Icon
-                  size={20}
-                  strokeWidth={active ? 2.4 : 2}
-                  className={`shrink-0 transition-transform duration-200 ${
-                    active ? "scale-105" : "group-hover:scale-105"
-                  }`}
-                />
-                {!collapsed && <span className="truncate">{item.label}</span>}
-                {!collapsed && item.badge && (
-                  <span className="ml-auto rounded-full bg-gradient-to-r from-brand-purple to-pink-500 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm">
-                    {item.badge}
-                  </span>
-                )}
-                {active && (
-                  <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-brand-blue" />
-                )}
-              </Link>
-            );
-          })}
+        <nav className="mt-2 flex-1 space-y-4 overflow-y-auto scrollbar-none px-3">
+          {navSections.map((section, sectionIndex) => (
+            <div key={section.label ?? `section-${sectionIndex}`} className="space-y-1">
+              {section.label && !collapsed && (
+                <p className="px-3.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-ink-faint/70 dark:text-gray-500">
+                  {section.label}
+                </p>
+              )}
+              {section.items.map((item) => {
+                const active =
+                  pathname === item.href ||
+                  (item.href !== "/dashboard" && pathname.startsWith(item.href));
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setMobileOpen(false)}
+                    className={`group relative flex items-center gap-3 rounded-full px-3.5 py-2.5 text-[14px] font-medium transition-all duration-200
+                    ${
+                      active
+                        ? "bg-blue-50 text-brand-blueDark dark:bg-blue-500/15 dark:text-blue-300"
+                        : "text-ink-soft hover:bg-surface-alt dark:text-gray-400 dark:hover:bg-white/5"
+                    }
+                    ${collapsed ? "justify-center" : ""}
+                    `}
+                    title={collapsed ? item.label : undefined}
+                  >
+                    <Icon
+                      size={20}
+                      strokeWidth={active ? 2.4 : 2}
+                      className={`shrink-0 transition-transform duration-200 ${
+                        active ? "scale-105" : "group-hover:scale-105"
+                      }`}
+                    />
+                    {!collapsed && <span className="truncate">{item.label}</span>}
+                    {!collapsed && item.badge && (
+                      <span className="ml-auto rounded-full bg-gradient-to-r from-brand-purple to-pink-500 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm">
+                        {item.badge}
+                      </span>
+                    )}
+                    {active && (
+                      <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-brand-blue" />
+                    )}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         {/* Bottom */}

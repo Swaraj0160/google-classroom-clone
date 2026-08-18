@@ -20,6 +20,7 @@ interface StudentRow {
   division: string | null;
   semester: string | null;
   joinedAt: string | null;
+  courseIds: string[];
   coursesCount: number;
   submissionsCount: number;
   average: number | null;
@@ -50,6 +51,8 @@ export default function StudentsPage() {
   const [loading, setLoading] = useState(true);
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [search, setSearch] = useState("");
+  const [courses, setCourses] = useState<{ id: string; title: string }[]>([]);
+  const [classFilter, setClassFilter] = useState<string>("all");
 
   useEffect(() => {
     const load = async () => {
@@ -62,12 +65,13 @@ export default function StudentsPage() {
         return;
       }
 
-      const { data: courses } = await supabase
+      const { data: courseRows } = await supabase
         .from("courses")
-        .select("id")
+        .select("id, title")
         .eq("faculty_id", user.id);
 
-      const courseIds = (courses ?? []).map((c) => c.id);
+      setCourses(courseRows ?? []);
+      const courseIds = (courseRows ?? []).map((c) => c.id);
       if (courseIds.length === 0) {
         setStudents([]);
         setLoading(false);
@@ -130,7 +134,8 @@ export default function StudentsPage() {
           );
         }
         const studentEnrollments = enrollmentRows.filter((e) => e.student_id === studentId);
-        const coursesCount = new Set(studentEnrollments.map((e) => e.course_id)).size;
+        const studentCourseIds = [...new Set(studentEnrollments.map((e) => e.course_id))];
+        const coursesCount = studentCourseIds.length;
         const earliestJoined = studentEnrollments.reduce<string | null>((earliest, e) => {
           if (!e.joined_at) return earliest;
           if (!earliest) return e.joined_at;
@@ -157,6 +162,7 @@ export default function StudentsPage() {
           division: profileRow?.division ?? null,
           semester: profileRow?.semester ?? null,
           joinedAt: earliestJoined,
+          courseIds: studentCourseIds,
           coursesCount,
           submissionsCount: studentSubmissions.length,
           average,
@@ -173,15 +179,18 @@ export default function StudentsPage() {
   }, []);
 
   const filteredStudents = useMemo(() => {
-    if (!search.trim()) return students;
-    const q = search.trim().toLowerCase();
-    return students.filter(
-      (s) =>
-        s.full_name.toLowerCase().includes(q) ||
-        s.email.toLowerCase().includes(q) ||
-        (s.roll_number ?? "").toLowerCase().includes(q)
-    );
-  }, [students, search]);
+    return students
+      .filter((s) => classFilter === "all" || s.courseIds.includes(classFilter))
+      .filter((s) => {
+        if (!search.trim()) return true;
+        const q = search.trim().toLowerCase();
+        return (
+          s.full_name.toLowerCase().includes(q) ||
+          s.email.toLowerCase().includes(q) ||
+          (s.roll_number ?? "").toLowerCase().includes(q)
+        );
+      });
+  }, [students, search, classFilter]);
 
   return (
     <div className="animate-fadeInUp space-y-6">
@@ -189,17 +198,32 @@ export default function StudentsPage() {
         <div>
           <h1 className="text-2xl font-bold text-ink dark:text-white">Students</h1>
           <p className="mt-1 text-sm text-ink-soft dark:text-gray-400">
-            {students.length} students across your classes
+            {filteredStudents.length} of {students.length} students
+            {classFilter === "all" ? " across your classes" : ""}
           </p>
         </div>
-        <div className="relative">
-          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-faint" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search students..."
-            className="rounded-full border border-black/10 bg-white py-2.5 pl-10 pr-4 text-sm outline-none focus:border-brand-blue dark:border-white/10 dark:bg-surface-darkAlt"
-          />
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={classFilter}
+            onChange={(e) => setClassFilter(e.target.value)}
+            className="rounded-full border border-black/10 bg-white px-3 py-2.5 text-sm text-ink-soft outline-none focus:border-brand-blue dark:border-white/10 dark:bg-surface-darkAlt dark:text-gray-300"
+          >
+            <option value="all">All classes</option>
+            {courses.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.title}
+              </option>
+            ))}
+          </select>
+          <div className="relative">
+            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-faint" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search students..."
+              className="rounded-full border border-black/10 bg-white py-2.5 pl-10 pr-4 text-sm outline-none focus:border-brand-blue dark:border-white/10 dark:bg-surface-darkAlt"
+            />
+          </div>
         </div>
       </div>
 

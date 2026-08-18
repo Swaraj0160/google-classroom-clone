@@ -31,7 +31,8 @@ interface UseAssignmentSubmissionsResult {
     submissionId: string,
     marks: number | null,
     feedback: string | null,
-    dueAt: string | null
+    dueAt: string | null,
+    successMessage?: string
   ) => Promise<boolean>;
   setReviewed: (submissionId: string, reviewed: boolean) => Promise<boolean>;
   bulkSetReviewed: (submissionIds: string[], reviewed: boolean) => Promise<void>;
@@ -172,7 +173,8 @@ export function useAssignmentSubmissions(
       submissionId: string,
       marks: number | null,
       feedback: string | null,
-      dueAt: string | null
+      dueAt: string | null,
+      successMessage = "Grade saved."
     ): Promise<boolean> => {
       const current = roster.find((r) => r.submission?.id === submissionId)?.submission;
       if (!current) return false;
@@ -209,7 +211,9 @@ export function useAssignmentSubmissions(
         if (!reviewedError) patchSubmission(submissionId, { reviewed: true });
       }
 
-      showToast.success("Grade saved.");
+      // Empty string = caller will show its own combined summary toast
+      // (used by bulk operations so N selections don't produce N toasts).
+      if (successMessage) showToast.success(successMessage);
       return true;
     },
     [roster, patchSubmission]
@@ -256,7 +260,7 @@ export function useAssignmentSubmissions(
       let succeeded = 0;
       for (const id of submissionIds) {
         // eslint-disable-next-line no-await-in-loop -- sequential to keep per-row status logic simple and correct
-        const ok = await saveGrade(id, marks, null, dueAt);
+        const ok = await saveGrade(id, marks, null, dueAt, "");
         if (ok) succeeded++;
       }
       if (succeeded > 0) {
