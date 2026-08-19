@@ -86,7 +86,9 @@ function classifyCell(submission: SubmissionRow | undefined, assignment: Assignm
 
 function cellExportText(cell: GradeCell): string {
   if (cell.kind === "not_submitted") return "—";
-  if (cell.kind === "graded") return `${cell.marks}${cell.maxMarks !== null ? `/${cell.maxMarks}` : ""}`;
+  // Official awarded marks only — the maximum is already in the column
+  // header, so it isn't repeated in every cell.
+  if (cell.kind === "graded") return `${cell.marks}`;
   return "Not Graded";
 }
 
@@ -531,7 +533,7 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
                             const content =
                               cell.kind === "graded" ? (
                                 <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-brand-green dark:bg-green-500/10">
-                                  {cell.marks}/{cell.maxMarks}
+                                  {cell.marks}
                                 </span>
                               ) : cell.kind === "not_graded" ? (
                                 <div>
