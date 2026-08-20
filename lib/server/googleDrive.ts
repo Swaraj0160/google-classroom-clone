@@ -147,6 +147,25 @@ async function getOrCreateFolder(
   return createChildFolder(drive, parentId, name);
 }
 
+const FOLDER_NAME_MAX_LENGTH = 120;
+
+/**
+ * Makes a DB-derived label (course title, assignment title, student name...)
+ * safe as a single Drive folder-name segment. Purely cosmetic/for human
+ * browsing — never used to derive or look up the actual file reference,
+ * which is always the Drive file id stored in the DB. Deliberately avoids
+ * regex character classes here; kept as plain split/join string ops.
+ */
+export function sanitizeFolderName(label: string): string {
+  const withoutSlashes = label.split("/").join("-").split("\\").join("-");
+  const collapsedWhitespace = withoutSlashes.split(/\s+/).join(" ").trim();
+  const truncated =
+    collapsedWhitespace.length > FOLDER_NAME_MAX_LENGTH
+      ? collapsedWhitespace.slice(0, FOLDER_NAME_MAX_LENGTH).trim()
+      : collapsedWhitespace;
+  return truncated || "untitled";
+}
+
 /** Walks/creates a nested folder path under the app's root Drive folder. */
 export async function resolveFolderPath(segments: string[]): Promise<string> {
   const drive = getDriveClient();

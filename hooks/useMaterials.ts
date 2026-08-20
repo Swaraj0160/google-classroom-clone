@@ -149,19 +149,13 @@ export function useMaterials(courseId: string): UseMaterialsResult {
             input.removedAttachmentIds!.includes(a.id)
           );
 
-          // Delete storage objects first, while the attachment rows still
-          // exist — the file API authorizes deletes via that ownership chain.
+          // deleteCourseFile -> /api/files/delete deletes the
+          // assignment_attachments row and the Drive object as one
+          // server-side operation (DB row first, Drive object second), so
+          // there's no longer a separate bulk DB delete here.
           await Promise.all(
-            toRemove
-              .filter((a) => a.file_path)
-              .map((a) => deleteCourseFile(a.file_path as string).catch(() => undefined))
+            toRemove.filter((a) => a.file_path).map((a) => deleteCourseFile(a.file_path as string))
           );
-
-          const { error: removeError } = await supabase
-            .from("assignment_attachments")
-            .delete()
-            .in("id", input.removedAttachmentIds);
-          if (removeError) throw removeError;
         }
 
         await uploadAttachments(id, input);
@@ -186,9 +180,10 @@ export function useMaterials(courseId: string): UseMaterialsResult {
           .map((a) => a.file_path)
           .filter((p): p is string => !!p);
 
-        // Delete storage objects first, while the attachment rows (and their
-        // parent course) still exist — the file API authorizes deletes by
-        // looking up that ownership chain.
+        // Best-effort per-attachment cleanup (DB row + Drive object, deleted
+        // atomically server-side by deleteCourseFile) before removing the
+        // material itself — any rows this misses are removed anyway via the
+        // FK cascade on the delete below.
         if (paths.length > 0) {
           await Promise.all(paths.map((p) => deleteCourseFile(p).catch(() => undefined)));
         }

@@ -2,19 +2,28 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 type ResourceType = "submission" | "assignment_attachment" | "announcement_attachment";
 
-interface ResolvedFile {
+const RESOURCE_TABLE: Record<ResourceType, string> = {
+  submission: "submission_files",
+  assignment_attachment: "assignment_attachments",
+  announcement_attachment: "announcement_attachments",
+};
+
+export interface ResolvedFile {
   type: ResourceType;
+  /** Primary key of the row in RESOURCE_TABLE[type] — needed to delete
+   * exactly that row server-side once a caller is authorized. */
+  rowId: string;
   courseId: string;
   studentId?: string;
 }
 
-async function resolveFileResource(
+export async function resolveFileResource(
   supabase: SupabaseClient,
   fileId: string
 ): Promise<ResolvedFile | null> {
   const { data: subFile } = await supabase
     .from("submission_files")
-    .select("submission_id")
+    .select("id, submission_id")
     .eq("file_path", fileId)
     .maybeSingle();
 
@@ -33,12 +42,17 @@ async function resolveFileResource(
       .maybeSingle();
     if (!assignment) return null;
 
-    return { type: "submission", courseId: assignment.course_id, studentId: submission.student_id };
+    return {
+      type: "submission",
+      rowId: subFile.id,
+      courseId: assignment.course_id,
+      studentId: submission.student_id,
+    };
   }
 
   const { data: asgAttach } = await supabase
     .from("assignment_attachments")
-    .select("assignment_id")
+    .select("id, assignment_id")
     .eq("file_path", fileId)
     .maybeSingle();
 
@@ -49,12 +63,12 @@ async function resolveFileResource(
       .eq("id", asgAttach.assignment_id)
       .maybeSingle();
     if (!assignment) return null;
-    return { type: "assignment_attachment", courseId: assignment.course_id };
+    return { type: "assignment_attachment", rowId: asgAttach.id, courseId: assignment.course_id };
   }
 
   const { data: annAttach } = await supabase
     .from("announcement_attachments")
-    .select("announcement_id")
+    .select("id, announcement_id")
     .eq("file_path", fileId)
     .maybeSingle();
 
@@ -65,10 +79,16 @@ async function resolveFileResource(
       .eq("id", annAttach.announcement_id)
       .maybeSingle();
     if (!announcement) return null;
-    return { type: "announcement_attachment", courseId: announcement.course_id };
+    return { type: "announcement_attachment", rowId: annAttach.id, courseId: announcement.course_id };
   }
 
   return null;
+}
+
+/** Table name backing a resource type, for deleting the exact row an
+ * already-authorized caller resolved via resolveFileResource. */
+export function tableForResource(type: ResourceType): string {
+  return RESOURCE_TABLE[type];
 }
 
 async function isFacultyOfCourse(
@@ -85,7 +105,7 @@ async function isFacultyOfCourse(
   return !!data;
 }
 
-async function isEnrolledInCourse(
+export async function isEnrolledInCourse(
   supabase: SupabaseClient,
   courseId: string,
   userId: string
@@ -127,6 +147,29 @@ export async function authorizeFileAccess(
 
   if (await isFacultyOfCourse(supabase, resource.courseId, userId)) return true;
   return isEnrolledInCourse(supabase, resource.courseId, userId);
+}
+
+/**
+ * Same permission boundary as authorizeFileAccess(..., "write"), but also
+ * hands back the resolved resource (table + row id) so a caller that's
+ * cleared to delete can do so without a second, separately-racing lookup —
+ * used by /api/files/delete to delete the DB row and the Drive object as
+ * one server-side operation instead of two client-driven network calls.
+ */
+export async function authorizeFileForDelete(
+  supabase: SupabaseClient,
+  fileId: string,
+  userId: string
+): Promise<ResolvedFile | null> {
+  const resource = await resolveFileResource(supabase, fileId);
+  if (!resource) return null;
+
+  if (resource.type === "submission") {
+    if (resource.studentId === userId) return resource;
+    return null;
+  }
+
+  return (await isFacultyOfCourse(supabase, resource.courseId, userId)) ? resource : null;
 }
 
 export async function authorizeCourseUpload(

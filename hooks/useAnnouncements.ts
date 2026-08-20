@@ -159,15 +159,13 @@ export function useAnnouncements(courseId: string): UseAnnouncementsResult {
 
   const deleteAttachment = useCallback(async (attachmentId: string, filePath: string) => {
     try {
-      // Delete the storage object first, while the attachment row still
-      // exists — the file API authorizes deletes via that ownership chain.
+      // deleteCourseFile -> /api/files/delete deletes the DB row and the
+      // Drive object as one server-side operation (DB row first, Drive
+      // object second) — this used to be two separate client-driven calls
+      // in the opposite order, which could leave an announcement_attachments
+      // row pointing at a permanently-deleted Drive file if the second call
+      // never completed.
       await deleteCourseFile(filePath);
-
-      const { error: deleteError } = await supabase
-        .from("announcement_attachments")
-        .delete()
-        .eq("id", attachmentId);
-      if (deleteError) throw deleteError;
 
       setAnnouncements((prev) =>
         prev.map((a) => ({

@@ -58,10 +58,15 @@ export async function GET(
       [meta, stream] = await Promise.all([getFileMeta(fileId), downloadFileStream(fileId)]);
     } catch (driveErr) {
       const category = classifyDriveError(driveErr);
+      const reason = sanitizeDriveError(driveErr);
       console.error(
-        "[api/files/view] category=" + category,
-        { fileId },
-        sanitizeDriveError(driveErr)
+        "[FILE_RETRIEVAL_FAILED]",
+        JSON.stringify({
+          driveFileId: fileId,
+          provider: "google_drive",
+          category,
+          reason: reason.message ?? reason.reason ?? String(reason.code ?? "unknown"),
+        })
       );
       const r = CATEGORY_RESPONSE[category];
       return NextResponse.json({ error: r.message }, { status: r.status });

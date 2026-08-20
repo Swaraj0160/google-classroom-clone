@@ -159,19 +159,15 @@ export function useAssignments(courseId: string): UseAssignmentsResult {
             input.removedAttachmentIds!.includes(a.id)
           );
 
-          // Delete storage objects first, while the attachment rows still
-          // exist — the file API authorizes deletes via that ownership chain.
+          // deleteCourseFile -> /api/files/delete deletes the
+          // assignment_attachments row and the Drive object as one
+          // server-side operation (DB row first, Drive object second), so
+          // there's no longer a separate bulk DB delete here — doing that
+          // as two independent client-driven steps (Drive first, DB second)
+          // is what could leave a row pointing at an already-deleted file.
           await Promise.all(
-            toRemove
-              .filter((a) => a.file_path)
-              .map((a) => deleteCourseFile(a.file_path as string).catch(() => undefined))
+            toRemove.filter((a) => a.file_path).map((a) => deleteCourseFile(a.file_path as string))
           );
-
-          const { error: removeError } = await supabase
-            .from("assignment_attachments")
-            .delete()
-            .in("id", input.removedAttachmentIds);
-          if (removeError) throw removeError;
         }
 
         await uploadAttachments(id, input);
@@ -196,9 +192,12 @@ export function useAssignments(courseId: string): UseAssignmentsResult {
           .map((a) => a.file_path)
           .filter((p): p is string => !!p);
 
-        // Delete storage objects first, while the assignment_attachments rows
-        // (and their parent assignment/course) still exist — the file API
-        // authorizes deletes by looking up that ownership chain.
+        // Best-effort per-attachment cleanup (DB row + Drive object, deleted
+        // atomically server-side by deleteCourseFile) before removing the
+        // assignment itself — any assignment_attachments rows this misses
+        // are removed anyway via the FK cascade on the assignments delete
+        // below, so a single flaky attachment must never block deleting the
+        // assignment.
         if (paths.length > 0) {
           await Promise.all(paths.map((p) => deleteCourseFile(p).catch(() => undefined)));
         }

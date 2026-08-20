@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "migrate:files": "node scripts/migrate-files-to-drive.ts",
-    "migrate:files:cleanup": "node scripts/migrate-files-cleanup.ts"
+    "migrate:files:cleanup": "node scripts/migrate-files-cleanup.ts",
+    "verify:drive-files": "node scripts/verify-drive-files.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",

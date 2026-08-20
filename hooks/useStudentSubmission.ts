@@ -232,9 +232,14 @@ export function useStudentSubmission(
       );
 
       try {
+        // deleteSubmissionFile -> /api/files/delete deletes the DB row and
+        // the Drive object as one server-side operation (DB row first, Drive
+        // object second) so a network drop or closed tab between two
+        // separate client-driven calls can never leave a submission_files
+        // row pointing at a Drive file that's already been permanently
+        // deleted — the exact bug that produced "This file could not be
+        // found in storage" for previously-affected students.
         await deleteSubmissionFile(file.file_path);
-        const { error } = await supabase.from("submission_files").delete().eq("id", fileId);
-        if (error) throw error;
 
         if (willRevertToPending) {
           const { error: revertError } = await supabase
