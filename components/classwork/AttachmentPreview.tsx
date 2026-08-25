@@ -14,7 +14,7 @@ import {
   Youtube,
 } from "lucide-react";
 import { AssignmentAttachment } from "@/types/classwork";
-import { getSignedFileUrl } from "@/lib/storage";
+import { fetchCourseFileBlob, downloadCourseFile } from "@/lib/storage";
 import { formatFileSize } from "@/lib/format";
 import { showToast } from "@/lib/toast";
 
@@ -56,8 +56,14 @@ export function AttachmentPreview({ attachment }: { attachment: AssignmentAttach
     if (!attachment.file_path) return;
     setPreviewing(true);
     try {
-      const url = await getSignedFileUrl(attachment.file_path);
-      window.open(url, "_blank", "noopener,noreferrer");
+      // Fetch and validate the bytes ourselves before opening a tab — an
+      // error response (Drive file missing, credentials expired, etc.)
+      // must never be handed to the browser as if it were the file.
+      const blob = await fetchCourseFileBlob(attachment.file_path);
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, "_blank", "noopener,noreferrer");
+      // Give the new tab a moment to load the blob before revoking it.
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
     } catch (err) {
       showToast.error(err instanceof Error ? err.message : "Could not open file");
     } finally {
@@ -69,17 +75,7 @@ export function AttachmentPreview({ attachment }: { attachment: AssignmentAttach
     if (!attachment.file_path) return;
     setDownloading(true);
     try {
-      const url = await getSignedFileUrl(attachment.file_path);
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = attachment.file_name ?? "download";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(blobUrl);
+      await downloadCourseFile(attachment.file_path, attachment.file_name ?? "download");
     } catch (err) {
       showToast.error(err instanceof Error ? err.message : "Could not download file");
     } finally {

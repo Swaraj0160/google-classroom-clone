@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 
 import type { AnnouncementAttachment } from "@/lib/types";
-import { getSignedFileUrl } from "@/lib/storage";
+import { fetchCourseFileBlob, downloadCourseFile } from "@/lib/storage";
 import { formatFileSize } from "@/lib/format";
 import { showToast } from "@/lib/toast";
 
@@ -53,8 +53,13 @@ export default function AttachmentChip({
   async function handlePreview() {
     setPreviewing(true);
     try {
-      const url = await getSignedFileUrl(attachment.file_path);
-      window.open(url, "_blank", "noopener,noreferrer");
+      // Fetch and validate the bytes ourselves before opening a tab — an
+      // error response must never be handed to the browser as if it were
+      // the file.
+      const blob = await fetchCourseFileBlob(attachment.file_path);
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
     } catch (err) {
       showToast.error(
         err instanceof Error ? err.message : "Could not open file"
@@ -67,17 +72,7 @@ export default function AttachmentChip({
   async function handleDownload() {
     setDownloading(true);
     try {
-      const url = await getSignedFileUrl(attachment.file_path);
-      const res = await fetch(url);
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = attachment.file_name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(blobUrl);
+      await downloadCourseFile(attachment.file_path, attachment.file_name);
     } catch (err) {
       showToast.error(
         err instanceof Error ? err.message : "Could not download file"

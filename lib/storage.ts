@@ -70,6 +70,41 @@ export async function getSignedFileUrl(
   return data.signedUrl;
 }
 
+/**
+ * Fetches a course/attachment file's actual bytes for preview/download,
+ * validating the HTTP response before ever treating it as binary content.
+ *
+ * This exists because a failure from /api/files/view/[fileId] (Drive file
+ * genuinely missing, Drive credentials expired, not authorized, etc.) comes
+ * back as a normal-looking response with a JSON error body — `res.blob()`
+ * doesn't care what's inside, so calling it without checking `res.ok` first
+ * turns that error message into a "file" the browser will happily save
+ * under the real filename (e.g. a few dozen bytes of `{"error":"..."}`
+ * saved as "assignment.docx"), which then fails to open and looks like
+ * corruption. lib/submission-storage.ts's downloadSubmissionFile already
+ * checks this; this is the equivalent for course/assignment/announcement
+ * attachments, used by both preview and download so there's exactly one
+ * correct binary-retrieval path instead of one per file type.
+ */
+export async function fetchCourseFileBlob(path: string): Promise<Blob> {
+  const url = await getSignedFileUrl(path);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(await readApiError(res, "Could not load this file."));
+  return res.blob();
+}
+
+export async function downloadCourseFile(path: string, fileName: string): Promise<void> {
+  const blob = await fetchCourseFileBlob(path);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export async function deleteCourseFile(path: string): Promise<void> {
   if (isDriveFileId(path)) {
     const res = await fetch("/api/files/delete", {
