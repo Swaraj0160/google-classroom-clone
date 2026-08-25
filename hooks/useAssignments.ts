@@ -118,7 +118,22 @@ export function useAssignments(courseId: string): UseAssignmentsResult {
 
         if (insertError) throw insertError;
 
-        await uploadAttachments(data.id, input);
+        // The assignment row above is already saved by this point — if the
+        // attachment upload fails (e.g. Drive storage is unavailable), that
+        // must not be reported as "failed to create assignment" (which
+        // would wrongly suggest nothing was saved) and must not silently
+        // hide that the attachment itself never made it in.
+        try {
+          await uploadAttachments(data.id, input);
+        } catch (attachErr) {
+          showToast.error(
+            `Assignment saved, but the attachment could not be uploaded: ${
+              attachErr instanceof Error ? attachErr.message : "Upload failed."
+            } You can add it later from Edit.`
+          );
+          await fetchAssignments();
+          return;
+        }
 
         showToast.success(input.type === "quiz" ? "Quiz created" : "Assignment created");
         await fetchAssignments();
@@ -153,24 +168,40 @@ export function useAssignments(courseId: string): UseAssignmentsResult {
 
         if (updateError) throw updateError;
 
-        if (input.removedAttachmentIds && input.removedAttachmentIds.length > 0) {
-          const target = assignments.find((a) => a.id === id);
-          const toRemove = (target?.attachments ?? []).filter((a) =>
-            input.removedAttachmentIds!.includes(a.id)
-          );
+        // The assignment's fields above are already saved by this point —
+        // an attachment add/remove failure past here (e.g. Drive storage
+        // unavailable) must be reported as such, not as "failed to update
+        // assignment" (which would wrongly suggest the edits above were
+        // lost).
+        try {
+          if (input.removedAttachmentIds && input.removedAttachmentIds.length > 0) {
+            const target = assignments.find((a) => a.id === id);
+            const toRemove = (target?.attachments ?? []).filter((a) =>
+              input.removedAttachmentIds!.includes(a.id)
+            );
 
-          // deleteCourseFile -> /api/files/delete deletes the
-          // assignment_attachments row and the Drive object as one
-          // server-side operation (DB row first, Drive object second), so
-          // there's no longer a separate bulk DB delete here — doing that
-          // as two independent client-driven steps (Drive first, DB second)
-          // is what could leave a row pointing at an already-deleted file.
-          await Promise.all(
-            toRemove.filter((a) => a.file_path).map((a) => deleteCourseFile(a.file_path as string))
+            // deleteCourseFile -> /api/files/delete deletes the
+            // assignment_attachments row and the Drive object as one
+            // server-side operation (DB row first, Drive object second), so
+            // there's no longer a separate bulk DB delete here — doing that
+            // as two independent client-driven steps (Drive first, DB
+            // second) is what could leave a row pointing at an
+            // already-deleted file.
+            await Promise.all(
+              toRemove.filter((a) => a.file_path).map((a) => deleteCourseFile(a.file_path as string))
+            );
+          }
+
+          await uploadAttachments(id, input);
+        } catch (attachErr) {
+          showToast.error(
+            `Assignment details saved, but attachments could not be updated: ${
+              attachErr instanceof Error ? attachErr.message : "Upload failed."
+            }`
           );
+          await fetchAssignments();
+          return;
         }
-
-        await uploadAttachments(id, input);
 
         showToast.success("Assignment updated");
         await fetchAssignments();

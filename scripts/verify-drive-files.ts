@@ -27,7 +27,7 @@ requireEnv([
   "GOOGLE_OAUTH_REFRESH_TOKEN",
 ]);
 
-const { getFileMeta } = await import("../lib/server/googleDrive.ts");
+const { getFileMeta, classifyDriveError } = await import("../lib/server/googleDrive.ts");
 const { isDriveFileId } = await import("../lib/isDriveFileId.ts");
 const { createSupabaseAdminClient } = await import("../lib/server/supabaseAdmin.ts");
 
@@ -69,27 +69,56 @@ async function main() {
 
   console.log(`\n=== Verifying ${rows.length} Drive-backed file reference(s) ===\n`);
 
-  let ok = 0;
-  let broken = 0;
-  const brokenRows: Row[] = [];
+  const counts = { VALID: 0, DRIVE_FILE_NOT_FOUND: 0, DRIVE_AUTH_FAILED: 0, DRIVE_PERMISSION_DENIED: 0, OTHER: 0 };
+  const brokenRows: (Row & { category: string })[] = [];
+  let consecutiveAuthFailures = 0;
 
   for (const row of rows) {
     try {
       await getFileMeta(row.file_path);
-      ok++;
-    } catch {
-      broken++;
-      brokenRows.push(row);
-      console.log(`  BROKEN  ${row.table}:${row.id}  "${row.file_name}"  (${row.file_path})`);
+      counts.VALID++;
+      consecutiveAuthFailures = 0;
+      continue;
+    } catch (err) {
+      const category = classifyDriveError(err);
+      if (category === "DRIVE_FILE_NOT_FOUND") counts.DRIVE_FILE_NOT_FOUND++;
+      else if (category === "DRIVE_AUTH_FAILED") counts.DRIVE_AUTH_FAILED++;
+      else if (category === "DRIVE_PERMISSION_DENIED") counts.DRIVE_PERMISSION_DENIED++;
+      else counts.OTHER++;
+      brokenRows.push({ ...row, category });
+      console.log(`  ${category}  ${row.table}:${row.id}  "${row.file_name}"  (${row.file_path})`);
+
+      if (category === "DRIVE_AUTH_FAILED") {
+        consecutiveAuthFailures++;
+        if (consecutiveAuthFailures >= 3) {
+          const remaining = rows.length - (counts.VALID + brokenRows.length);
+          console.log(
+            `\nStopping early: the last 3 checks all failed with DRIVE_AUTH_FAILED — the Google OAuth ` +
+              `refresh token itself is invalid, not these specific files. Checking the remaining ${remaining} ` +
+              `row(s) one-by-one would not produce meaningful VALID/BROKEN results until credentials are fixed.`
+          );
+          counts.DRIVE_AUTH_FAILED += remaining;
+          break;
+        }
+      } else {
+        consecutiveAuthFailures = 0;
+      }
     }
   }
 
   console.log("\n=== SUMMARY ===");
-  console.log(JSON.stringify({ total: rows.length, ok, broken }, null, 2));
+  console.log(JSON.stringify({ total: rows.length, ...counts }, null, 2));
 
-  if (brokenRows.length) {
+  if (counts.DRIVE_AUTH_FAILED > 0) {
     console.log(
-      "\nThese records point at Drive files that no longer exist. This script makes no changes — " +
+      "\nDRIVE_AUTH_FAILED means Google Drive credentials are currently invalid (expired/revoked refresh " +
+        "token) — this is an infrastructure problem, not evidence these specific files are missing. Re-run " +
+        "this script after reconnecting Drive OAuth to get real VALID/BROKEN counts."
+    );
+  }
+  if (counts.DRIVE_FILE_NOT_FOUND > 0) {
+    console.log(
+      "\nDRIVE_FILE_NOT_FOUND rows point at Drive files that no longer exist. This script makes no changes — " +
         "affected students/faculty should re-upload the file; do not delete these DB rows without confirming " +
         "the underlying work is unrecoverable."
     );

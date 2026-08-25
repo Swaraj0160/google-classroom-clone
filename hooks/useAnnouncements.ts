@@ -83,21 +83,35 @@ export function useAnnouncements(courseId: string): UseAnnouncementsResult {
 
         if (insertError) throw insertError;
 
+        // The announcement row above is already saved by this point — an
+        // attachment upload failure past here must not be reported as
+        // "failed to post announcement" (which would wrongly suggest
+        // nothing was posted).
         if (files.length > 0) {
-          const uploaded = await Promise.all(
-            files.map((file) => uploadCourseFile(cid, `announcements/${announcement.id}`, file))
-          );
+          try {
+            const uploaded = await Promise.all(
+              files.map((file) => uploadCourseFile(cid, `announcements/${announcement.id}`, file))
+            );
 
-          const { error: attachError } = await supabase.from("announcement_attachments").insert(
-            uploaded.map((f) => ({
-              announcement_id: announcement.id,
-              file_name: f.name,
-              file_path: f.path,
-              file_type: f.type,
-              file_size: f.size,
-            }))
-          );
-          if (attachError) throw attachError;
+            const { error: attachError } = await supabase.from("announcement_attachments").insert(
+              uploaded.map((f) => ({
+                announcement_id: announcement.id,
+                file_name: f.name,
+                file_path: f.path,
+                file_type: f.type,
+                file_size: f.size,
+              }))
+            );
+            if (attachError) throw attachError;
+          } catch (attachErr) {
+            showToast.error(
+              `Announcement posted, but the attachment could not be uploaded: ${
+                attachErr instanceof Error ? attachErr.message : "Upload failed."
+              }`
+            );
+            await fetchAnnouncements();
+            return;
+          }
         }
 
         showToast.success("Announcement posted");

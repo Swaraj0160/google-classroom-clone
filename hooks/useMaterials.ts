@@ -114,7 +114,21 @@ export function useMaterials(courseId: string): UseMaterialsResult {
 
         if (insertError) throw insertError;
 
-        await uploadAttachments(data.id, input);
+        // The material row above is already saved by this point — an
+        // attachment upload failure past here must not be reported as
+        // "failed to create material" (which would wrongly suggest nothing
+        // was saved).
+        try {
+          await uploadAttachments(data.id, input);
+        } catch (attachErr) {
+          showToast.error(
+            `Material saved, but the attachment could not be uploaded: ${
+              attachErr instanceof Error ? attachErr.message : "Upload failed."
+            } You can add it later from Edit.`
+          );
+          await fetchMaterials();
+          return;
+        }
 
         showToast.success("Material posted");
         await fetchMaterials();
@@ -143,22 +157,32 @@ export function useMaterials(courseId: string): UseMaterialsResult {
 
         if (updateError) throw updateError;
 
-        if (input.removedAttachmentIds && input.removedAttachmentIds.length > 0) {
-          const target = materials.find((m) => m.id === id);
-          const toRemove = (target?.attachments ?? []).filter((a) =>
-            input.removedAttachmentIds!.includes(a.id)
-          );
+        try {
+          if (input.removedAttachmentIds && input.removedAttachmentIds.length > 0) {
+            const target = materials.find((m) => m.id === id);
+            const toRemove = (target?.attachments ?? []).filter((a) =>
+              input.removedAttachmentIds!.includes(a.id)
+            );
 
-          // deleteCourseFile -> /api/files/delete deletes the
-          // assignment_attachments row and the Drive object as one
-          // server-side operation (DB row first, Drive object second), so
-          // there's no longer a separate bulk DB delete here.
-          await Promise.all(
-            toRemove.filter((a) => a.file_path).map((a) => deleteCourseFile(a.file_path as string))
+            // deleteCourseFile -> /api/files/delete deletes the
+            // assignment_attachments row and the Drive object as one
+            // server-side operation (DB row first, Drive object second), so
+            // there's no longer a separate bulk DB delete here.
+            await Promise.all(
+              toRemove.filter((a) => a.file_path).map((a) => deleteCourseFile(a.file_path as string))
+            );
+          }
+
+          await uploadAttachments(id, input);
+        } catch (attachErr) {
+          showToast.error(
+            `Material details saved, but attachments could not be updated: ${
+              attachErr instanceof Error ? attachErr.message : "Upload failed."
+            }`
           );
+          await fetchMaterials();
+          return;
         }
-
-        await uploadAttachments(id, input);
 
         showToast.success("Material updated");
         await fetchMaterials();

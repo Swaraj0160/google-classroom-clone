@@ -1,8 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseRouteClient } from "@/lib/server/supabaseServer";
 import { authorizeCourseUpload, isEnrolledInCourse } from "@/lib/server/fileAuthorization";
-import { getFileMeta, resolveFolderPath, sanitizeFolderName, uploadFile } from "@/lib/server/googleDrive";
+import { classifyDriveError, getFileMeta, resolveFolderPath, sanitizeFolderName, uploadFile } from "@/lib/server/googleDrive";
 import { getViewedUserId, VIEW_ONLY_MESSAGE } from "@/lib/server/viewAs";
+
+/** Sanitized, user-facing message for a Drive failure during upload —
+ *  distinguishes "storage credentials are broken" (an infrastructure
+ *  problem only an admin can fix) from a generic, retry-able failure,
+ *  instead of collapsing every cause into "Upload failed. Please try
+ *  again." regardless of what actually went wrong. */
+function uploadFailureResponse(err: unknown): { status: number; error: string } {
+  const category = classifyDriveError(err);
+  if (category === "DRIVE_AUTH_FAILED") {
+    return {
+      status: 503,
+      error: "Google Drive authentication has expired. Please contact your administrator to reconnect storage.",
+    };
+  }
+  if (category === "DRIVE_PERMISSION_DENIED") {
+    return {
+      status: 503,
+      error: "File storage access was denied. Please contact your administrator.",
+    };
+  }
+  return { status: 502, error: "File upload failed while saving to storage. Please try again." };
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -120,10 +142,11 @@ export async function POST(request: NextRequest) {
         err instanceof Error ? err.message : err
       );
       const notConfigured = err instanceof Error && err.message.includes("not configured");
-      return NextResponse.json(
-        { error: notConfigured ? "File storage is not configured on the server." : "Upload failed. Please try again." },
-        { status: notConfigured ? 503 : 502 }
-      );
+      if (notConfigured) {
+        return NextResponse.json({ error: "File storage is not configured on the server." }, { status: 503 });
+      }
+      const { status, error } = uploadFailureResponse(err);
+      return NextResponse.json({ error }, { status });
     }
 
     console.log("[api/files/upload] stage=folder_resolved", JSON.stringify({ folderId }));
@@ -137,7 +160,8 @@ export async function POST(request: NextRequest) {
         JSON.stringify({ folderId, fileName: file.name }),
         err instanceof Error ? err.message : err
       );
-      return NextResponse.json({ error: "Upload failed. Please try again." }, { status: 502 });
+      const { status, error } = uploadFailureResponse(err);
+      return NextResponse.json({ error }, { status });
     }
 
     console.log(
@@ -157,7 +181,8 @@ export async function POST(request: NextRequest) {
         JSON.stringify({ driveFileId: uploaded.id, fileName: uploaded.name }),
         err instanceof Error ? err.message : err
       );
-      return NextResponse.json({ error: "Upload could not be verified. Please try again." }, { status: 502 });
+      const { status, error } = uploadFailureResponse(err);
+      return NextResponse.json({ error: `Upload could not be verified: ${error}` }, { status });
     }
 
     console.log(
