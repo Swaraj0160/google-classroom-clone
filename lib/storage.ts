@@ -2,10 +2,15 @@
 
 import { supabase } from "@/lib/supabase";
 import { isDriveFileId } from "@/lib/isDriveFileId";
+import { uploadFileToDrive } from "@/lib/driveResumableUpload";
 
 export const CLASSROOM_BUCKET = "classroom-files";
 
-// Adjust to your requirements — spec says "configurable".
+// Adjust to your requirements — spec says "configurable". Mirrored
+// server-side in app/api/files/upload/session/route.ts's
+// COURSE_FILE_MAX_BYTES — the real enforcement now happens there (and, via
+// Drive's own X-Upload-Content-Length cap, at Google), not here; this
+// check just avoids a pointless round trip for an obviously-oversized file.
 const MAX_UPLOAD_SIZE_BYTES = 25 * 1024 * 1024; // 25MB
 
 export interface UploadedFile {
@@ -27,9 +32,11 @@ async function readApiError(res: Response, fallback: string): Promise<string> {
 }
 
 /**
- * Uploads a new file to Google Drive via the server API (courseId/scope
- * decide the Drive folder: courses/{courseId}/{scope}). The browser never
- * talks to Google/Supabase Storage directly for new uploads.
+ * Uploads a new file to Google Drive (courseId/scope decide the Drive
+ * folder: courses/{courseId}/{scope}). Bytes go straight from the browser
+ * to Drive via a resumable upload session — see
+ * lib/driveResumableUpload.ts — never through this app's own server, so
+ * Vercel's ~4.5MB request-body limit never applies.
  */
 export async function uploadCourseFile(
   courseId: string,
@@ -38,15 +45,8 @@ export async function uploadCourseFile(
 ): Promise<UploadedFile> {
   assertFileSize(file);
 
-  const form = new FormData();
-  form.append("mode", "course");
-  form.append("courseId", courseId);
-  form.append("scope", scope);
-  form.append("file", file);
-
-  const res = await fetch("/api/files/upload", { method: "POST", body: form });
-  if (!res.ok) throw new Error(await readApiError(res, "Upload failed."));
-  return res.json();
+  const result = await uploadFileToDrive(file, { mode: "course", courseId, scope });
+  return { path: result.path, name: result.name, type: result.type, size: file.size };
 }
 
 /**

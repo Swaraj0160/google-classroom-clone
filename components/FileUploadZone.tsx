@@ -11,8 +11,6 @@ interface FileUploadZoneProps {
   accept?: string;
 }
 
-const MAX_FILE_SIZE = 100 * 1024 * 1024; //100MB
-
 export function FileUploadZone({
   onFilesSelected,
   disabled = false,
@@ -23,17 +21,23 @@ export function FileUploadZone({
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
 
+  // No independent size gate here. This previously silently dropped any
+  // file over a hardcoded 100MB with zero feedback — a student picking a
+  // large video would see nothing happen and no explanation — while also
+  // displaying "Maximum file size: 100 MB" right next to the actual,
+  // much smaller, category-specific limits shown by
+  // lib/fileValidation.ts's SUBMISSION_LIMITS_SUMMARY just below this
+  // component. That's the real, enforced limit (also checked server-side
+  // implicitly via the same upload path); this component just hands
+  // through whatever was picked so the one real check produces one
+  // accurate, visible error instead of two disagreeing, partially-silent
+  // ones.
   const handleFiles = useCallback(
     (fileList: FileList | null) => {
       if (!fileList) return;
-
       const files = Array.from(fileList);
-
-      const valid = files.filter((file) => file.size <= MAX_FILE_SIZE);
-
-      if (!valid.length) return;
-
-      onFilesSelected(valid);
+      if (!files.length) return;
+      onFilesSelected(files);
     },
     [onFilesSelected]
   );
@@ -106,10 +110,6 @@ export function FileUploadZone({
           <FilePlus2 size={14} />
           PDF • DOCX • PPT • ZIP • Images • Videos
         </div>
-
-        <p className="mt-3 text-xs text-gray-400">
-          Maximum file size: 100 MB
-        </p>
       </div>
     </div>
   );

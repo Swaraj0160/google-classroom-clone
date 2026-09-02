@@ -46,17 +46,34 @@ export type DriveErrorCategory =
   | "DRIVE_FILE_NOT_FOUND"
   | "DRIVE_PERMISSION_DENIED"
   | "DRIVE_AUTH_FAILED"
+  | "DRIVE_STORAGE_QUOTA_EXCEEDED"
+  | "DRIVE_RATE_LIMITED"
   | "DRIVE_DOWNLOAD_FAILED";
 
 /**
- * Buckets a Drive/OAuth error into one of the categories callers (currently
- * app/api/files/view/[fileId]/route.ts) use to pick a response that doesn't
- * lie to the user — an expired/revoked refresh token must never be reported
- * as "file not found", since the file may be perfectly fine.
+ * Buckets a Drive/OAuth error into one of the categories callers (view and
+ * upload routes) use to pick a response that doesn't lie to the user — an
+ * expired/revoked refresh token must never be reported as "file not found",
+ * and a real storage-quota error must never be collapsed into the same
+ * generic "permission denied" bucket as an ordinary 403, since the fix is
+ * completely different (contact an admin to free/expand storage, vs. a
+ * genuine access-control problem). Checked in order of specificity: Google
+ * returns 403 for several unrelated reasons (quota, rate limiting, plain
+ * permission denial) that all share the same HTTP status code and are only
+ * distinguishable via the structured `reason` field.
  */
 export function classifyDriveError(err: unknown): DriveErrorCategory {
   const info = sanitizeDriveError(err);
   if (info.reason === "invalid_grant" || info.code === 401) return "DRIVE_AUTH_FAILED";
+  if (info.reason === "storageQuotaExceeded") return "DRIVE_STORAGE_QUOTA_EXCEEDED";
+  if (
+    info.reason === "rateLimitExceeded" ||
+    info.reason === "userRateLimitExceeded" ||
+    info.reason === "dailyLimitExceeded" ||
+    info.code === 429
+  ) {
+    return "DRIVE_RATE_LIMITED";
+  }
   if (info.code === 404) return "DRIVE_FILE_NOT_FOUND";
   if (info.code === 403) return "DRIVE_PERMISSION_DENIED";
   return "DRIVE_DOWNLOAD_FAILED";
@@ -68,7 +85,29 @@ export function classifyDriveError(err: unknown): DriveErrorCategory {
  * actual account that owns "Faculty Classroom Storage". See
  * app/api/auth/google for the one-time authorization flow that issues the
  * refresh token.
+ *
+ * Cached at module scope (one instance per warm process) instead of
+ * constructing a fresh OAuth2Client per call. google-auth-library's
+ * OAuth2Client already caches the short-lived access token it gets back and
+ * only re-hits Google's token endpoint once that access token actually
+ * expires (~1 hour) — but only if the SAME client instance is reused. The
+ * previous version built a brand-new client (and therefore forced a brand
+ *-new refresh-token exchange with Google) on every single Drive call, which
+ * under real concurrent traffic meant a very high-frequency burst of
+ * refresh-token exchanges against Google's token endpoint from a small
+ * number of source IPs. That pattern — many rapid exchanges of the same
+ * refresh token in a short window — is exactly what Google's abuse/security
+ * heuristics are documented to flag as anomalous and can respond to by
+ * revoking the token ("Token has been expired or revoked"), independent of
+ * the token's normal validity window. This was directly observed during
+ * diagnosis: a freshly-issued token worked correctly across dozens of Drive
+ * calls, then started failing with invalid_grant within minutes, after
+ * many separate short-lived clients had each independently re-exchanged it.
+ * Reusing one client removes that self-inflicted load without changing any
+ * other behavior.
  */
+let cachedOAuth2Client: InstanceType<typeof google.auth.OAuth2> | null = null;
+
 function getAuth() {
   const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
@@ -84,9 +123,20 @@ function getAuth() {
     throw new Error("Google Drive is not configured on the server.");
   }
 
+  if (cachedOAuth2Client) return cachedOAuth2Client;
+
   const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
   oauth2Client.setCredentials({ refresh_token: refreshToken });
+  cachedOAuth2Client = oauth2Client;
   return oauth2Client;
+}
+
+/** Test-only escape hatch: drop the cached client (e.g. after rotating the
+ *  refresh token within the same long-lived process) so the next call
+ *  builds a fresh one from current env vars instead of reusing a stale
+ *  instance. Not used by any request path. */
+export function resetDriveAuthCache(): void {
+  cachedOAuth2Client = null;
 }
 
 function getDriveClient(): drive_v3.Drive {
@@ -241,6 +291,69 @@ export async function uploadFile(
     mimeType: res.data.mimeType ?? mimeType,
     size: Number(res.data.size ?? buffer.byteLength),
   };
+}
+
+/**
+ * Starts a Google Drive resumable-upload session and returns the session
+ * URL Google issues — the browser then PUTs the file's bytes directly to
+ * that URL (see docs/architecture note below), never through this server.
+ *
+ * WHY: Vercel Serverless Functions enforce a hard ~4.5MB request body
+ * limit at the platform level, before a route handler even runs — proven
+ * in production (a 6MB request to /api/files/upload came back
+ * `413 FUNCTION_PAYLOAD_TOO_LARGE` from Vercel itself, with the actual
+ * cutoff between 4MB and 4.4MB). uploadFile() above (buffer through this
+ * server) is therefore only safe for uploads comfortably under that
+ * ceiling; anything the app's own advertised limits allow (documents up
+ * to 10MB, archives/video up to 25MB, submissions totaling up to 30MB)
+ * would routinely fail that way — a raw platform error with no useful
+ * message, unrelated to Drive/DB health.
+ *
+ * SECURITY: this never hands the browser any standing credential. The
+ * session URL is single-use, tied to the exact `name`/`parents` decided
+ * here from server-validated folder/authorization logic (a client cannot
+ * redirect the upload to a different folder), and Drive enforces the
+ * `X-Upload-Content-Length` declared here as a hard cap on how many bytes
+ * the session will accept — so the byte-count limit this app already
+ * validates before calling this function is enforced by Google itself,
+ * not by anything watching the bytes in transit. The resulting file id is
+ * never trusted on its own afterward — see getFileMeta()'s use in the
+ * finalize step, which independently re-fetches it from Drive before any
+ * DB row is created.
+ */
+export async function createResumableUploadSession(
+  folderId: string,
+  fileName: string,
+  mimeType: string,
+  fileSizeBytes: number
+): Promise<{ uploadUrl: string }> {
+  const auth = getAuth();
+  try {
+    const res = await auth.request<unknown>({
+      url: "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,mimeType,size&supportsAllDrives=true",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json; charset=UTF-8",
+        "X-Upload-Content-Type": mimeType || "application/octet-stream",
+        "X-Upload-Content-Length": String(fileSizeBytes),
+      },
+      data: { name: fileName, parents: [folderId] },
+    });
+    const headers = res.headers as unknown as { get?: (name: string) => string | null } & Record<string, string>;
+    const uploadUrl = typeof headers?.get === "function" ? headers.get("location") : headers?.location;
+    if (!uploadUrl) {
+      console.error("[googleDrive] stage=resumable_session_no_location", { folderId, fileName });
+      throw new Error("Google Drive did not return an upload session URL.");
+    }
+    return { uploadUrl };
+  } catch (err) {
+    console.error(
+      "[googleDrive] stage=create_resumable_session_failed",
+      { folderId, fileName, fileSizeBytes },
+      sanitizeDriveError(err)
+    );
+    throw err;
+  }
 }
 
 export interface DriveFileMeta {

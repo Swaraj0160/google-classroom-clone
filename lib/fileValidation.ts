@@ -49,7 +49,18 @@ function getExtension(fileName: string): string {
   return idx === -1 ? "" : fileName.slice(idx).toLowerCase();
 }
 
-export function classifyFile(file: File): FileCategory {
+/** Only the properties actually needed to classify/size-check a file — a
+ *  DOM File satisfies this shape, but so does a plain {name,type,size}
+ *  object, so this (and everything built on it below) is safe to import
+ *  from server code that only has a client-reported name/type/size, not a
+ *  real File/Blob. */
+export interface FileLike {
+  name: string;
+  type: string;
+  size: number;
+}
+
+export function classifyFile(file: FileLike): FileCategory {
   const type = (file.type || "").toLowerCase();
   const ext = getExtension(file.name);
 
@@ -74,6 +85,34 @@ export interface SubmissionValidationResult {
   message?: string;
 }
 
+/** Single-file size check only (no count/running-total context needed) —
+ *  the part of validateSubmissionFiles that's also useful server-side,
+ *  where only one file's metadata is known at a time (see
+ *  app/api/files/upload/session/route.ts). */
+export function checkSubmissionFileSize(file: FileLike): SubmissionValidationResult {
+  if (file.size > ABSOLUTE_MAX_FILE_BYTES) {
+    return {
+      valid: false,
+      message: `${file.name} is ${formatMb(file.size)}. No file may exceed ${formatMb(
+        ABSOLUTE_MAX_FILE_BYTES
+      )}.`,
+    };
+  }
+
+  const category = classifyFile(file);
+  const limit = CATEGORY_LIMITS[category];
+  if (file.size > limit) {
+    return {
+      valid: false,
+      message: `${file.name} is ${formatMb(file.size)}. ${CATEGORY_LABELS[category]} must be ${formatMb(
+        limit
+      )} or smaller.`,
+    };
+  }
+
+  return { valid: true };
+}
+
 /**
  * Validates a batch of newly-selected files against a submission's existing
  * files (so count/size limits can't be bypassed by uploading in batches).
@@ -81,7 +120,7 @@ export interface SubmissionValidationResult {
  */
 export function validateSubmissionFiles(
   existingFiles: ExistingSubmissionFile[],
-  newFiles: File[]
+  newFiles: FileLike[]
 ): SubmissionValidationResult {
   if (newFiles.length === 0) return { valid: true };
 
@@ -93,25 +132,8 @@ export function validateSubmissionFiles(
   }
 
   for (const file of newFiles) {
-    if (file.size > ABSOLUTE_MAX_FILE_BYTES) {
-      return {
-        valid: false,
-        message: `${file.name} is ${formatMb(file.size)}. No file may exceed ${formatMb(
-          ABSOLUTE_MAX_FILE_BYTES
-        )}.`,
-      };
-    }
-
-    const category = classifyFile(file);
-    const limit = CATEGORY_LIMITS[category];
-    if (file.size > limit) {
-      return {
-        valid: false,
-        message: `${file.name} is ${formatMb(file.size)}. ${CATEGORY_LABELS[category]} must be ${formatMb(
-          limit
-        )} or smaller.`,
-      };
-    }
+    const singleCheck = checkSubmissionFileSize(file);
+    if (!singleCheck.valid) return singleCheck;
   }
 
   const existingTotal = existingFiles.reduce((sum, f) => sum + (f.file_size ?? 0), 0);

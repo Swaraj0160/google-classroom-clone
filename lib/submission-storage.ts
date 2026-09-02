@@ -9,6 +9,8 @@
 
 import { supabase } from "@/lib/supabase";
 import { isDriveFileId } from "@/lib/isDriveFileId";
+import { uploadFileToDrive } from "@/lib/driveResumableUpload";
+import type { SubmissionFile } from "@/types/submission";
 
 const BUCKET = "submissions";
 
@@ -25,27 +27,22 @@ export interface UploadResult {
 }
 
 /**
- * Upload single submission file (Google Drive, via the server API)
+ * Upload single submission file. Bytes go straight from the browser to
+ * Drive via a resumable upload session (lib/driveResumableUpload.ts) —
+ * never through this app's own server — so Vercel's ~4.5MB request-body
+ * limit never applies, and the app's real 10/25/30MB submission limits
+ * (lib/fileValidation.ts) are actually enforceable.
  */
 export async function uploadSubmissionFile(
   assignmentId: string,
   studentId: string,
   file: File
 ): Promise<UploadResult> {
-  const form = new FormData();
-  form.append("mode", "submission");
-  form.append("assignmentId", assignmentId);
-  form.append("studentId", studentId);
-  form.append("file", file);
-
-  const res = await fetch("/api/files/upload", { method: "POST", body: form });
-  if (!res.ok) throw new Error(await readApiError(res, "Upload failed."));
-
-  const uploaded = await res.json();
+  const uploaded = await uploadFileToDrive(file, { mode: "submission", assignmentId, studentId });
   return {
     path: uploaded.path,
     fileName: uploaded.name ?? file.name,
-    fileSize: uploaded.size ?? file.size,
+    fileSize: file.size,
     fileType: uploaded.type || file.type || "application/octet-stream",
   };
 }
@@ -63,6 +60,26 @@ export async function uploadSubmissionFiles(
       uploadSubmissionFile(assignmentId, studentId, file)
     )
   );
+}
+
+/**
+ * Repairs one specific broken submission file: uploads the replacement to
+ * Drive, then has the server update that exact submission_files row in
+ * place (same row id, marked status="reuploaded") instead of inserting a
+ * new one — see app/api/files/upload/finalize/route.ts's replaceFileId
+ * handling. Not yet reachable from any committed UI — part of a paused
+ * re-upload-notification feature gated on a DB migration
+ * (submission_files.status) that hasn't been applied yet.
+ */
+export async function reuploadSubmissionFile(
+  assignmentId: string,
+  studentId: string,
+  replaceFileId: string,
+  file: File
+): Promise<SubmissionFile> {
+  const result = await uploadFileToDrive(file, { mode: "submission", assignmentId, studentId, replaceFileId });
+  if (!result.replaced || !result.file) throw new Error("Re-upload failed.");
+  return result.file as unknown as SubmissionFile;
 }
 
 /**

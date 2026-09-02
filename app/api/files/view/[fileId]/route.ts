@@ -10,14 +10,22 @@ const CATEGORY_RESPONSE: Record<string, { status: number; message: string }> = {
     status: 400,
     message: "This file reference is not Drive-backed and can't be served by this route.",
   },
-  DRIVE_FILE_NOT_FOUND: { status: 404, message: "This file could not be found in storage." },
+  DRIVE_FILE_NOT_FOUND: { status: 404, message: "This file is no longer available in storage." },
   DRIVE_PERMISSION_DENIED: {
     status: 503,
     message: "File storage access was denied. Please contact your administrator.",
   },
   DRIVE_AUTH_FAILED: {
     status: 503,
-    message: "File storage is temporarily unavailable. Please contact your administrator.",
+    message: "Google Drive storage authentication has expired. Please contact your administrator.",
+  },
+  DRIVE_STORAGE_QUOTA_EXCEEDED: {
+    status: 503,
+    message: "Storage quota has been exceeded. Please contact your administrator.",
+  },
+  DRIVE_RATE_LIMITED: {
+    status: 503,
+    message: "File storage is temporarily busy. Please try again in a moment.",
   },
   DRIVE_DOWNLOAD_FAILED: { status: 502, message: "File could not be retrieved. Please try again." },
   UNEXPECTED_ERROR: { status: 500, message: "File could not be retrieved. Please try again." },
