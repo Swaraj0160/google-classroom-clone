@@ -241,12 +241,10 @@ export default function StudentGradesPage() {
                       <span className="font-semibold">Graded</span>
                     </div>
 
-                    <div className="mt-2 text-3xl font-bold">
-                      {submission.marks ?? "-"}
-                      {assignment?.total_marks != null && (
-                        <span className="text-lg text-gray-500"> / {assignment.total_marks}</span>
-                      )}
-                    </div>
+                    <div className="mt-2 text-3xl font-bold">{submission.marks ?? "-"}</div>
+                    {assignment?.total_marks != null && (
+                      <div className="text-xs font-medium text-gray-400">out of {assignment.total_marks}</div>
+                    )}
                   </div>
                 </div>
 

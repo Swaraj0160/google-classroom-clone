@@ -208,9 +208,7 @@ function StudentView({
                   </div>
                   <div className="flex items-center gap-3 text-right">
                     {submission?.marks != null && (
-                      <span className="text-sm font-semibold text-ink dark:text-white">
-                        {submission.marks}/{a.total_marks ?? "—"}
-                      </span>
+                      <span className="text-sm font-semibold text-ink dark:text-white">{submission.marks}</span>
                     )}
                     <SubmissionStatusBadge status={submission?.status ?? "pending"} />
                   </div>

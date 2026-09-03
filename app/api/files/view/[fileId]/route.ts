@@ -27,6 +27,10 @@ const CATEGORY_RESPONSE: Record<string, { status: number; message: string }> = {
     status: 503,
     message: "File storage is temporarily busy. Please try again in a moment.",
   },
+  DRIVE_NETWORK_ERROR: {
+    status: 502,
+    message: "Could not reach file storage. Please check your connection and try again.",
+  },
   DRIVE_DOWNLOAD_FAILED: { status: 502, message: "File could not be retrieved. Please try again." },
   UNEXPECTED_ERROR: { status: 500, message: "File could not be retrieved. Please try again." },
 };

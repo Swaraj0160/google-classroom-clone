@@ -46,6 +46,9 @@ function sanitizedSessionFailure(err: unknown): { status: number; error: string 
   if (category === "DRIVE_PERMISSION_DENIED") {
     return { status: 503, error: "File storage access was denied. Please contact your administrator." };
   }
+  if (category === "DRIVE_NETWORK_ERROR") {
+    return { status: 502, error: "Could not reach file storage. Please check your connection and try again." };
+  }
   return { status: 502, error: "Could not start the upload. Please try again." };
 }
 

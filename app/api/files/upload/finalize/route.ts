@@ -26,6 +26,9 @@ function finalizeFailureResponse(err: unknown): { status: number; error: string 
   if (category === "DRIVE_FILE_NOT_FOUND") {
     return { status: 502, error: "Upload could not be verified — the file was not found in storage. Please try again." };
   }
+  if (category === "DRIVE_NETWORK_ERROR") {
+    return { status: 502, error: "Could not reach file storage to verify the upload. Please try again." };
+  }
   return { status: 502, error: "Upload could not be verified. Please try again." };
 }
 
