@@ -14,13 +14,25 @@
  *      right folder.
  *   2. PUT the file's bytes directly to that URL — Google's servers, not
  *      ours. Vercel is not in this request's path at all.
- *   3. POST /api/files/upload/finalize — re-verifies the resulting file is
- *      real (never trusts the client-reported id on its own) and, for a
- *      replaceFileId repair, updates that DB row server-side.
+ *   3. POST /api/files/upload/finalize — authoritatively determines the
+ *      real outcome server-side and, for a replaceFileId repair, updates
+ *      that DB row server-side.
  *
- * See lib/server/googleDrive.ts's createResumableUploadSession for the
- * security model (why a client can't redirect the upload elsewhere or
- * exceed the size it was validated for).
+ * Step 2's response is deliberately NOT trusted, and a thrown error from
+ * it is NOT treated as fatal — proven during production diagnosis: Google
+ * correctly answers the CORS preflight for this PUT (allowing it), and the
+ * PUT itself does complete the upload, but its actual success response is
+ * missing Access-Control-Allow-Origin (present only on the preflight), so
+ * the browser's fetch() rejects with a bare "Failed to fetch" regardless
+ * of whether the upload actually worked. Reading anything from that
+ * response — status, body, whether the promise even resolved — is
+ * unreliable by design of Google's endpoint, not a bug in this file. Step
+ * 3 is what actually determines success: it re-queries the same session
+ * URL from the server, where CORS does not apply, and is the one place a
+ * DB row ever gets written from.
+ *
+ * See lib/server/googleDrive.ts's createResumableUploadSession and
+ * checkResumableUploadStatus for the full security/CORS explanation.
  */
 
 async function readApiError(res: Response, fallback: string): Promise<string> {
@@ -63,26 +75,28 @@ export async function uploadFileToDrive(
   const { uploadUrl } = await sessionRes.json();
   if (!uploadUrl) throw new Error("Could not start the upload.");
 
-  // Straight to Google, never through our own server — no Content-Length
-  // header here: it's a forbidden header for fetch() to set manually, and
-  // the browser sets it correctly from the File body automatically.
-  const putRes = await fetch(uploadUrl, {
-    method: "PUT",
-    headers: { "Content-Type": file.type || "application/octet-stream" },
-    body: file,
-  });
-  if (!putRes.ok) {
-    throw new Error("Upload to storage failed. Please try again.");
+  // Best-effort: straight to Google, never through our own server. Do NOT
+  // treat a thrown error (or any part of the response) as meaningful — see
+  // the file-level doc comment above for exactly why that's unreliable
+  // here. No Content-Length header: it's a forbidden header for fetch() to
+  // set manually, and the browser sets it correctly from the File body.
+  try {
+    await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
+  } catch {
+    // Expected in the common case — see doc comment. Fall through to
+    // finalize regardless, which is the actual source of truth.
   }
-  const uploadedMeta = await putRes.json().catch(() => null);
-  const driveFileId = uploadedMeta?.id;
-  if (!driveFileId) throw new Error("Upload to storage failed. Please try again.");
 
   const finalizeRes = await fetch("/api/files/upload/finalize", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      driveFileId,
+      uploadUrl,
+      totalBytes: file.size,
       replaceFileId: request.replaceFileId,
       assignmentId: request.assignmentId,
     }),

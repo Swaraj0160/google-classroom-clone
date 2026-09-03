@@ -1,21 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseRouteClient } from "@/lib/server/supabaseServer";
 import { createSupabaseAdminClient } from "@/lib/server/supabaseAdmin";
-import { classifyDriveError, getFileMeta } from "@/lib/server/googleDrive";
+import { checkResumableUploadStatus, classifyDriveError, DriveUploadIncompleteError } from "@/lib/server/googleDrive";
 import { getViewedUserId, VIEW_ONLY_MESSAGE } from "@/lib/server/viewAs";
 
 /**
- * Step 2 of 2 (see session/route.ts for step 1). The browser has already
- * PUT its file bytes directly to the Drive session URL from step 1 and
- * Drive has handed back a file id — but that id is client-reported and
- * never trusted on its own. This step independently re-fetches it from
- * Drive (the same "confirm the object is actually retrievable before
- * reporting success" guarantee the old single-request upload route had)
- * before the client is ever told it's safe to persist a DB reference to
- * it, and performs the replace-in-place DB update server-side when
- * repairing a previously-broken submission file.
+ * Step 2 of 2 (see session/route.ts for step 1).
+ *
+ * Takes the session's uploadUrl (which the browser already has — it's not
+ * new exposure) rather than a client-reported driveFileId. Proven during
+ * production diagnosis: the browser's direct PUT to that URL is correctly
+ * allowed by Google's CORS preflight, and Google does complete the upload,
+ * but the actual PUT success response is missing
+ * Access-Control-Allow-Origin (present only on the preflight), so the
+ * browser's fetch() rejects with a bare "Failed to fetch" — even though
+ * the file now exists in Drive. Trusting a driveFileId the browser claims
+ * to have read out of that same blocked response meant this route could
+ * never even be reached on a real (successful) upload. Instead,
+ * checkResumableUploadStatus() re-queries the same session URL from this
+ * server (a plain server-to-server request; CORS is a browser-only
+ * mechanism) to authoritatively learn the real outcome — the browser's PUT
+ * becomes best-effort/fire-and-forget, and this status check is the one
+ * source of truth for whether a DB row is ever created.
  */
 function finalizeFailureResponse(err: unknown): { status: number; error: string } {
+  if (err instanceof DriveUploadIncompleteError) {
+    return { status: 502, error: "The upload did not finish. Please try again." };
+  }
   const category = classifyDriveError(err);
   if (category === "DRIVE_AUTH_FAILED") {
     return {
@@ -45,26 +56,43 @@ export async function POST(request: NextRequest) {
     if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
 
     const body = await request.json().catch(() => null);
-    const driveFileId = body?.driveFileId;
+    const uploadUrl = body?.uploadUrl;
+    const totalBytes = Number(body?.totalBytes);
     const replaceFileId = body?.replaceFileId;
     const assignmentId = body?.assignmentId;
 
-    if (typeof driveFileId !== "string" || !driveFileId) {
-      return NextResponse.json({ error: "Missing driveFileId." }, { status: 400 });
+    if (typeof uploadUrl !== "string" || !uploadUrl) {
+      return NextResponse.json({ error: "Missing uploadUrl." }, { status: 400 });
+    }
+    if (!Number.isFinite(totalBytes) || totalBytes <= 0) {
+      return NextResponse.json({ error: "Missing or invalid totalBytes." }, { status: 400 });
+    }
+    // Basic SSRF guard: this route only ever PUTs to a Drive-issued upload
+    // session URL, never to an arbitrary client-supplied host.
+    let parsedUploadUrl: URL;
+    try {
+      parsedUploadUrl = new URL(uploadUrl);
+    } catch {
+      return NextResponse.json({ error: "Invalid uploadUrl." }, { status: 400 });
+    }
+    if (parsedUploadUrl.hostname !== "www.googleapis.com") {
+      return NextResponse.json({ error: "Invalid uploadUrl." }, { status: 400 });
     }
 
-    let meta;
+    let file;
     try {
-      meta = await getFileMeta(driveFileId);
+      file = await checkResumableUploadStatus(uploadUrl, totalBytes);
     } catch (err) {
       console.error(
         "[api/files/upload/finalize] stage=verify_failed",
-        JSON.stringify({ driveFileId }),
+        JSON.stringify({ totalBytes }),
         err instanceof Error ? err.message : err
       );
       const { status, error } = finalizeFailureResponse(err);
       return NextResponse.json({ error }, { status });
     }
+    const driveFileId = file.id;
+    const meta = { name: file.name, mimeType: file.mimeType };
 
     console.log(
       "[FILE_UPLOAD]",

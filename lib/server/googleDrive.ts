@@ -416,10 +416,10 @@ export async function uploadFile(
  * `X-Upload-Content-Length` declared here as a hard cap on how many bytes
  * the session will accept — so the byte-count limit this app already
  * validates before calling this function is enforced by Google itself,
- * not by anything watching the bytes in transit. The resulting file id is
- * never trusted on its own afterward — see getFileMeta()'s use in the
- * finalize step, which independently re-fetches it from Drive before any
- * DB row is created.
+ * not by anything watching the bytes in transit. The browser's own read of
+ * the PUT response is never trusted for the resulting file id — see
+ * checkResumableUploadStatus()'s doc comment for why, and how finalize
+ * determines the real outcome server-side instead.
  */
 export async function createResumableUploadSession(
   folderId: string,
@@ -456,6 +456,100 @@ export async function createResumableUploadSession(
       throw err;
     }
   });
+}
+
+/**
+ * Thrown by checkResumableUploadStatus when Drive reports the upload as
+ * genuinely incomplete (a real 308, not a CORS artifact) — distinct from
+ * every other failure so the finalize route can tell "the browser hasn't
+ * finished sending bytes yet / really did fail" apart from an auth/network
+ * problem contacting Google at all.
+ */
+export class DriveUploadIncompleteError extends Error {
+  readonly bytesReceived: number | null;
+  constructor(bytesReceived: number | null) {
+    super("Google Drive reports this upload has not finished.");
+    this.name = "DriveUploadIncompleteError";
+    this.bytesReceived = bytesReceived;
+  }
+}
+
+/**
+ * Authoritatively determines whether a resumable upload session actually
+ * completed, and returns the resulting file's resource if so — WITHOUT
+ * depending on the browser having successfully read the PUT response.
+ *
+ * WHY THIS EXISTS (found and proven during production diagnosis, not
+ * assumed): a browser PUT straight to a Drive resumable-upload session URL
+ * is correctly allowed by Google's CORS preflight (OPTIONS returns a
+ * matching Access-Control-Allow-Origin), and Google DOES receive and
+ * complete the upload — but the actual PUT's success response is missing
+ * Access-Control-Allow-Origin, which the Fetch spec requires on the real
+ * response too, not just the preflight. The browser's fetch() therefore
+ * rejects with a bare network-level "Failed to fetch", even though the
+ * file now exists in Drive. The old design trusted the browser to read the
+ * file id out of that same blocked response, so it never learned the
+ * upload actually worked and never called finalize.
+ *
+ * The fix: this function re-queries the SAME session URL from the server
+ * (a plain server-to-server request — CORS is a browser-only mechanism
+ * and does not apply here) using Drive's documented status-check request
+ * (an empty PUT with a Content-Range header of "bytes (star)/(total)").
+ * Google responds
+ * with the completed file resource if the upload finished (regardless of
+ * whether the browser ever saw that), or a 308 with a Range header if it
+ * genuinely hasn't. This makes the actual upload outcome fully knowable
+ * server-side no matter what the browser's fetch() experienced — the
+ * browser's PUT becomes best-effort/fire-and-forget, and this status check
+ * is the one authoritative source of truth finalize relies on.
+ */
+export async function checkResumableUploadStatus(
+  uploadUrl: string,
+  totalBytes: number
+): Promise<DriveFileResult> {
+  let res: Response;
+  try {
+    res = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Range": `bytes */${totalBytes}`,
+        "Content-Length": "0",
+      },
+    });
+  } catch (err) {
+    console.error("[googleDrive] stage=resumable_status_check_network_failed", err instanceof Error ? err.message : err);
+    throw err;
+  }
+
+  if (res.status === 308) {
+    const range = res.headers.get("range");
+    const bytesReceived = range ? Number(range.split("-")[1] ?? 0) + 1 : null;
+    console.error(
+      "[googleDrive] stage=resumable_status_incomplete",
+      JSON.stringify({ totalBytes, bytesReceived })
+    );
+    throw new DriveUploadIncompleteError(bytesReceived);
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    console.error(
+      "[googleDrive] stage=resumable_status_check_failed",
+      JSON.stringify({ status: res.status, body: body.slice(0, 500) })
+    );
+    throw new Error(`Drive upload status check failed with status ${res.status}.`);
+  }
+
+  const data = await res.json();
+  if (!data.id) {
+    throw new Error("Drive upload completed but returned no file id.");
+  }
+  return {
+    id: data.id,
+    name: data.name ?? "file",
+    mimeType: data.mimeType ?? "application/octet-stream",
+    size: Number(data.size ?? totalBytes),
+  };
 }
 
 export interface DriveFileMeta {
