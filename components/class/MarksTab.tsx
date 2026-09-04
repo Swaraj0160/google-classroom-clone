@@ -52,16 +52,24 @@ interface GradeCell {
 /**
  * The ONE place a submission+assignment pair turns into a gradebook cell —
  * used for both the on-screen table and the Excel/PDF export, so they can
- * never disagree. A submission existing (even "on time") never implies
- * graded; only submissions.status === "graded" with a real marks value is
- * ever displayed as an official mark.
+ * never disagree. Faculty-entered marks take precedence; otherwise a submitted
+ * work item receives the automatic timing-based mark immediately.
  */
 function classifyCell(submission: SubmissionRow | undefined, assignment: AssignmentRow): GradeCell {
   const turnedIn = !!submission && submission.status !== "pending" && !!submission.submitted_at;
+
   if (!turnedIn) {
-    return { kind: "not_submitted", marks: null, maxMarks: assignment.total_marks, suggestedMarks: null, submissionId: null };
+    return {
+      kind: "not_submitted",
+      marks: null,
+      maxMarks: assignment.total_marks,
+      suggestedMarks: null,
+      submissionId: null,
+    };
   }
-  if (submission!.status === "graded" && submission!.marks !== null) {
+
+  // Faculty-entered marks always take precedence.
+  if (submission!.marks !== null) {
     return {
       kind: "graded",
       marks: submission!.marks,
@@ -70,24 +78,41 @@ function classifyCell(submission: SubmissionRow | undefined, assignment: Assignm
       submissionId: submission!.id,
     };
   }
+
+  // No faculty mark exists: award the automatic mark immediately in the
+  // gradebook. This uses the same 100% / 80% / 70% policy as lib/grading.ts.
+  // The database trigger should persist this value; the UI also calculates it
+  // directly so the gradebook never shows "Not Graded" while waiting for a
+  // manual approval step.
   const { suggestedMarks } = calculateSubmissionGrade({
     dueAt: assignment.due_date,
     submittedAt: submission!.submitted_at,
     maxMarks: assignment.total_marks,
   });
+
+  if (suggestedMarks !== null) {
+    return {
+      kind: "graded",
+      marks: suggestedMarks,
+      maxMarks: assignment.total_marks,
+      suggestedMarks: null,
+      submissionId: submission!.id,
+    };
+  }
+
   return {
     kind: "not_graded",
     marks: null,
     maxMarks: assignment.total_marks,
-    suggestedMarks,
+    suggestedMarks: null,
     submissionId: submission!.id,
   };
 }
 
 function cellExportText(cell: GradeCell): string {
   if (cell.kind === "not_submitted") return "—";
-  // Official awarded marks only — the maximum is already in the column
-  // header, so it isn't repeated in every cell.
+  // Official/displayed marks. Automatic marks are awarded immediately, so
+  // exports must contain the same direct mark shown in the gradebook.
   if (cell.kind === "graded") return `${cell.marks}`;
   return "Not Graded";
 }
@@ -241,31 +266,36 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
   // not-submitted are excluded entirely, never treated as zero.
   const assignmentAverage = useMemo(() => {
     return visibleAssignments.map((a) => {
-      const graded = students
-        .map((student) => submissionByKey.get(`${student.id}:${a.id}`))
-        .filter((s): s is SubmissionRow => !!s && s.status === "graded" && s.marks !== null);
-      if (graded.length === 0) return null;
-      const avg = graded.reduce((sum, s) => sum + Number(s.marks), 0) / graded.length;
-      return avg;
+      const assignmentIndex = visibleAssignments.findIndex((item) => item.id === a.id);
+      const gradedCells = students
+        .map((student) => cellsByStudent.get(student.id)?.[assignmentIndex])
+        .filter((cell): cell is GradeCell => !!cell && cell.kind === "graded" && cell.marks !== null);
+
+      if (gradedCells.length === 0) return null;
+
+      return gradedCells.reduce((sum, cell) => sum + Number(cell.marks), 0) / gradedCells.length;
     });
-  }, [visibleAssignments, students, submissionByKey]);
+  }, [visibleAssignments, students, cellsByStudent]);
 
   const classSummary = useMemo(() => {
     let graded = 0;
     let pendingReview = 0;
     const percentages: number[] = [];
 
-    submissions.forEach((s) => {
-      const turnedIn = s.status !== "pending" && !!s.submitted_at;
-      if (!turnedIn) return;
-      if (s.status === "graded" && s.marks !== null) {
-        graded++;
-        const assignment = assignments.find((a) => a.id === s.assignment_id);
-        const total = assignment?.total_marks ?? 0;
-        if (total > 0) percentages.push((Number(s.marks) / total) * 100);
-      } else {
-        pendingReview++;
-      }
+    students.forEach((student) => {
+      const cells = cellsByStudent.get(student.id) ?? [];
+
+      cells.forEach((cell, index) => {
+        if (cell.kind === "not_submitted") return;
+
+        if (cell.kind === "graded" && cell.marks !== null) {
+          graded++;
+          const total = visibleAssignments[index]?.total_marks ?? 0;
+          if (total > 0) percentages.push((Number(cell.marks) / total) * 100);
+        } else {
+          pendingReview++;
+        }
+      });
     });
 
     const turnedInTotal = graded + pendingReview;
@@ -280,7 +310,7 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
         ? Math.round(percentages.reduce((a, b) => a + b, 0) / percentages.length)
         : null,
     };
-  }, [submissions, assignments, students]);
+  }, [students, cellsByStudent, visibleAssignments, assignments.length]);
 
   const filteredStudents = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -532,20 +562,18 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
                             const cell = cells[i];
                             const content =
                               cell.kind === "graded" ? (
-                                <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-brand-green dark:bg-green-500/10">
-                                  {cell.marks}
-                                </span>
-                              ) : cell.kind === "not_graded" ? (
                                 <div>
-                                  <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
-                                    Not Graded
+                                  <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-brand-green dark:bg-green-500/10">
+                                    {cell.marks}/{cell.maxMarks}
                                   </span>
-                                  {cell.suggestedMarks !== null && (
-                                    <p className="mt-1 text-[10px] text-ink-faint">
-                                      Suggested {cell.suggestedMarks}/{cell.maxMarks}
-                                    </p>
+                                  {cell.suggestedMarks === null && (
+                                    <p className="mt-1 text-[10px] text-ink-faint">Auto graded</p>
                                   )}
                                 </div>
+                              ) : cell.kind === "not_graded" ? (
+                                <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
+                                  Not Graded
+                                </span>
                               ) : (
                                 <span className="text-xs text-ink-faint">—</span>
                               );
