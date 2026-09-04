@@ -191,7 +191,7 @@ export default function SubmissionReviewPage() {
 
       const { data: filesData } = await supabase
         .from("submission_files")
-        .select("id, submission_id, file_name, file_path, file_type, file_size, status, status_updated_at")
+        .select("id, submission_id, file_name, file_path, file_type, file_size, created_at")
         .eq("submission_id", submissionData.id);
 
       setSubmissionFiles((filesData ?? []) as SubmissionFile[]);
@@ -286,10 +286,15 @@ export default function SubmissionReviewPage() {
     void persistGrade(null, "Returned for review — no official grade is recorded.");
   };
 
-  // marks is the authoritative indicator that a score exists. Do not require
-  // status === "graded", because older rows can have a valid mark while their
-  // status was not updated by an older grading path.
-  const isGraded = submission?.marks !== null && submission?.marks !== undefined;
+  // submissions.marks defaults to 0 at the database level (every row starts
+  // this way from the initial "pending" insert, before any submission or
+  // grading ever happens) — it is never actually NULL in production, so a
+  // `marks !== null` check is always true and would show every submission as
+  // "graded: 0". submissions.status is the authoritative graded indicator
+  // used everywhere else in this app (see hooks/useAssignmentSubmissions.ts,
+  // MarksTab.tsx, the student grades page): status only becomes "graded" via
+  // an explicit faculty save or the automatic-grading trigger/repair below.
+  const isGraded = submission?.status === "graded";
 
   const scorePercent =
     isGraded && assignment?.total_marks !== null && assignment?.total_marks !== undefined && assignment.total_marks > 0

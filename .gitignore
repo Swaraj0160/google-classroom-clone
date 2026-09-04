@@ -23,3 +23,5 @@ Thumbs.db
 
 # migration script state (local ledger, not app data)
 scripts/.migration-state.json
+.vercel
+.env*

@@ -68,8 +68,14 @@ function classifyCell(submission: SubmissionRow | undefined, assignment: Assignm
     };
   }
 
-  // Faculty-entered marks always take precedence.
-  if (submission!.marks !== null) {
+  // Faculty-entered (or already auto-graded) marks always take precedence.
+  // submissions.marks defaults to 0 at the database level for every row from
+  // the moment it's created (long before submission or grading), so it is
+  // never actually NULL in production — checking `marks !== null` here would
+  // always be true and every submission would show as "graded: 0" instead of
+  // computing the real automatic grade below. submissions.status is the
+  // authoritative graded indicator used everywhere else in this app.
+  if (submission!.status === "graded") {
     return {
       kind: "graded",
       marks: submission!.marks,

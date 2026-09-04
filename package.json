@@ -9,7 +9,8 @@
     "lint": "next lint",
     "migrate:files": "node scripts/migrate-files-to-drive.ts",
     "migrate:files:cleanup": "node scripts/migrate-files-cleanup.ts",
-    "verify:drive-files": "node scripts/verify-drive-files.ts"
+    "verify:drive-files": "node scripts/verify-drive-files.ts",
+    "grade:backfill": "node scripts/auto-grade-backfill.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",

@@ -71,12 +71,18 @@ export function calculateSubmissionGrade({
   }
 
   const submittedTime = new Date(submittedAt).getTime();
+  if (!Number.isFinite(submittedTime)) {
+    return { suggestedMarks: null, timingCategory: null, lateByMs: null };
+  }
 
   let timingCategory: TimingCategory = "on_time";
   let lateByMs: number | null = null;
 
   if (dueAt) {
     const dueTime = new Date(dueAt).getTime();
+    if (!Number.isFinite(dueTime)) {
+      return { suggestedMarks: null, timingCategory: null, lateByMs: null };
+    }
     lateByMs = submittedTime - dueTime;
     if (lateByMs <= 0) {
       timingCategory = "on_time";
