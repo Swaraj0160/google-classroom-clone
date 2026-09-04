@@ -34,6 +34,12 @@ interface SubmissionRow {
   feedback: string | null;
   submitted_at: string | null;
   updated_at?: string;
+  /** 'auto' when the mark was set by the on-time/late grading trigger,
+   *  'manual' once a faculty member has explicitly saved a grade (which
+   *  then permanently takes precedence — the trigger never overwrites a
+   *  'manual' row again). Absent on databases that haven't run
+   *  scripts/sql/2026-09-02-auto-grading.sql yet. */
+  grading_source?: "auto" | "manual" | null;
 }
 
 interface StudentRow {
@@ -70,7 +76,7 @@ export default function SubmissionReviewPage() {
 
       const { data: submissionData, error: submissionError } = await supabase
         .from("submissions")
-        .select("id, assignment_id, student_id, status, marks, feedback, submitted_at, updated_at")
+        .select("id, assignment_id, student_id, status, marks, feedback, submitted_at, updated_at, grading_source")
         .eq("id", submissionId)
         .maybeSingle();
 
@@ -92,6 +98,71 @@ export default function SubmissionReviewPage() {
 
       if (assignmentData) {
         setAssignment(assignmentData);
+
+        // Automatic grading is authoritative for every submission that has not
+        // been explicitly graded by faculty. This also repairs older rows that
+        // were left at 0 / NULL while the UI only showed a "Suggested grade".
+        if (
+          submissionData.submitted_at &&
+          assignmentData.total_marks !== null &&
+          assignmentData.total_marks !== undefined &&
+          submissionData.grading_source !== "manual"
+        ) {
+          const autoGrade = calculateSubmissionGrade({
+            dueAt: assignmentData.due_date ?? null,
+            submittedAt: submissionData.submitted_at,
+            maxMarks: assignmentData.total_marks,
+          });
+
+          if (autoGrade.suggestedMarks !== null) {
+            const wasLate =
+              !!assignmentData.due_date &&
+              new Date(submissionData.submitted_at) > new Date(assignmentData.due_date);
+
+            const autoStatus = deriveStatusAfterManualGrade(
+              submissionData.status,
+              wasLate,
+              autoGrade.suggestedMarks
+            );
+
+            const needsAutoGrade =
+              submissionData.marks !== autoGrade.suggestedMarks ||
+              submissionData.grading_source !== "auto" ||
+              submissionData.status !== autoStatus;
+
+            if (needsAutoGrade) {
+              const { data: autoGradedSubmission, error: autoGradeError } = await supabase
+                .from("submissions")
+                .update({
+                  marks: autoGrade.suggestedMarks,
+                  status: autoStatus,
+                  grading_source: "auto",
+                })
+                .eq("id", submissionData.id)
+                .select(
+                  "id, assignment_id, student_id, status, marks, feedback, submitted_at, updated_at, grading_source"
+                )
+                .maybeSingle();
+
+              if (autoGradeError || !autoGradedSubmission) {
+                console.error("[SubmissionReview] automatic grading failed", autoGradeError);
+                setError(
+                  "Automatic grading could not be saved. Please verify the database grading setup."
+                );
+              } else {
+                // The database value is now the authoritative value on this page.
+                setSubmission(autoGradedSubmission);
+                setMarksInput(String(autoGradedSubmission.marks));
+                submissionData.marks = autoGradedSubmission.marks;
+                submissionData.status = autoGradedSubmission.status;
+                submissionData.grading_source = autoGradedSubmission.grading_source;
+              }
+            } else {
+              setMarksInput(String(autoGrade.suggestedMarks));
+            }
+          }
+        }
+
         const { data: courseData } = await supabase
           .from("courses")
           .select("title")
@@ -120,7 +191,7 @@ export default function SubmissionReviewPage() {
 
       const { data: filesData } = await supabase
         .from("submission_files")
-        .select("id, submission_id, file_name, file_path, file_type, file_size")
+        .select("id, submission_id, file_name, file_path, file_type, file_size, status, status_updated_at")
         .eq("submission_id", submissionData.id);
 
       setSubmissionFiles((filesData ?? []) as SubmissionFile[]);
@@ -179,9 +250,14 @@ export default function SubmissionReviewPage() {
         marks: marksOverride,
         feedback: feedbackInput.trim() === "" ? null : feedbackInput,
         status: newStatus,
+        // Any explicit save through this UI — typed or "Accept Suggested" —
+        // is a faculty decision and permanently takes precedence over the
+        // auto-grading trigger. Clearing marks (Return / Needs Revision)
+        // resets this so a later resubmission can be auto-graded again.
+        grading_source: marksOverride !== null ? "manual" : null,
       })
       .eq("id", submission.id)
-      .select("id, assignment_id, student_id, status, marks, feedback, submitted_at, updated_at")
+      .select("id, assignment_id, student_id, status, marks, feedback, submitted_at, updated_at, grading_source")
       .maybeSingle();
 
     if (updateError || !data) {
@@ -206,23 +282,19 @@ export default function SubmissionReviewPage() {
     void persistGrade(parsedMarks, "Changes saved successfully.");
   };
 
-  const handleAcceptSuggested = () => {
-    if (suggestedMarks === null) return;
-    void persistGrade(suggestedMarks, `Accepted — awarded ${suggestedMarks}${assignment?.total_marks !== null ? `/${assignment?.total_marks}` : ""}.`);
-  };
-
   const handleReturn = () => {
     void persistGrade(null, "Returned for review — no official grade is recorded.");
   };
 
-  const scorePercent =
-    submission?.marks !== null &&
-    submission?.marks !== undefined &&
-    assignment?.total_marks
-      ? Math.round((Number(submission.marks) / assignment.total_marks) * 100)
-      : null;
+  // marks is the authoritative indicator that a score exists. Do not require
+  // status === "graded", because older rows can have a valid mark while their
+  // status was not updated by an older grading path.
+  const isGraded = submission?.marks !== null && submission?.marks !== undefined;
 
-  const isGraded = submission?.status === "graded" && submission?.marks !== null;
+  const scorePercent =
+    isGraded && assignment?.total_marks !== null && assignment?.total_marks !== undefined && assignment.total_marks > 0
+      ? Math.round((Number(submission?.marks) / assignment.total_marks) * 100)
+      : null;
   const { suggestedMarks, timingCategory, lateByMs } = calculateSubmissionGrade({
     dueAt: assignment?.due_date ?? null,
     submittedAt: submission?.submitted_at ?? null,
@@ -329,7 +401,7 @@ export default function SubmissionReviewPage() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-ink-faint">Status</span>
-                {submission?.status === "graded" && (
+                {isGraded && (
                   <span className="flex items-center gap-1.5 rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-brand-green dark:bg-green-500/10">
                     <CheckCircle2 size={12} /> Graded
                   </span>
@@ -414,34 +486,30 @@ export default function SubmissionReviewPage() {
             <h3 className="mb-3 text-sm font-semibold text-ink dark:text-white">Grading</h3>
 
             {isGraded ? (
-              <div className="mb-4 flex items-center gap-2 rounded-xl bg-green-50 px-3.5 py-2.5 dark:bg-green-900/20">
-                <CheckCircle2 size={16} className="shrink-0 text-green-600 dark:text-green-400" />
-                <p className="text-sm text-green-800 dark:text-green-300">
-                  <span className="font-semibold">
-                    Graded: {submission?.marks}
-                    {assignment?.total_marks !== null ? `/${assignment?.total_marks}` : ""}
-                  </span>{" "}
-                  · Graded by Faculty
-                  {submission?.updated_at
-                    ? ` · ${new Date(submission.updated_at).toLocaleString(undefined, {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}`
-                    : ""}
-                </p>
+              <div className="mb-4 rounded-xl bg-green-50 px-3.5 py-3 dark:bg-green-900/20">
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-green-600 dark:text-green-400" />
+                  <div>
+                    <p className="text-sm font-semibold text-green-800 dark:text-green-300">
+                      Awarded grade: {submission?.marks}
+                      {assignment?.total_marks !== null && assignment?.total_marks !== undefined
+                        ? ` / ${assignment.total_marks}`
+                        : ""}
+                    </p>
+                    <p className="mt-0.5 text-xs text-green-700 dark:text-green-400">
+                      {submission?.grading_source === "auto"
+                        ? `Automatically graded · ${suggestionReason}`
+                        : "Graded by Faculty"}
+                    </p>
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="mb-4 rounded-xl bg-surface-alt px-3.5 py-2.5 dark:bg-white/5">
-                <p className="text-xs text-ink-faint">Suggested grade</p>
+                <p className="text-xs text-ink-faint">Grade</p>
                 <p className="text-sm font-semibold text-ink dark:text-white">
-                  {suggestedMarks !== null
-                    ? `${suggestedMarks}${assignment?.total_marks !== null ? ` / ${assignment?.total_marks}` : ""}`
-                    : "—"}
+                  No grade recorded
                 </p>
-                <p className="text-xs text-ink-faint">Reason: {suggestionReason}</p>
               </div>
             )}
 
@@ -470,15 +538,6 @@ export default function SubmissionReviewPage() {
                   className="w-full resize-none rounded-xl border border-black/10 bg-white px-4 py-2.5 text-sm outline-none focus:border-brand-blue dark:border-white/10 dark:bg-surface-dark"
                 />
               </div>
-              {suggestedMarks !== null && !isGraded && (
-                <button
-                  onClick={handleAcceptSuggested}
-                  disabled={saving}
-                  className="flex w-full items-center justify-center gap-2 rounded-full bg-green-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-60"
-                >
-                  Accept &amp; Award Suggested Grade
-                </button>
-              )}
               <button
                 onClick={handleSave}
                 disabled={saving}
