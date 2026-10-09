@@ -441,7 +441,8 @@ export async function createResumableUploadSession(
         data: { name: fileName, parents: [folderId] },
       });
       const headers = res.headers as unknown as { get?: (name: string) => string | null } & Record<string, string>;
-      const uploadUrl = typeof headers?.get === "function" ? headers.get("location") : headers?.location;
+      const getHeader = (name: string) => typeof headers?.get === "function" ? headers.get(name) : headers?.[name];
+      const uploadUrl = getHeader("location") || getHeader("Location");
       if (!uploadUrl) {
         console.error("[googleDrive] stage=resumable_session_no_location", { folderId, fileName });
         throw new Error("Google Drive did not return an upload session URL.");

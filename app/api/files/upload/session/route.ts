@@ -6,6 +6,7 @@ import {
   createResumableUploadSession,
   resolveFolderPath,
   sanitizeFolderName,
+  sanitizeDriveError,
 } from "@/lib/server/googleDrive";
 import { checkSubmissionFileSize } from "@/lib/fileValidation";
 import { getViewedUserId, VIEW_ONLY_MESSAGE } from "@/lib/server/viewAs";
@@ -49,7 +50,12 @@ function sanitizedSessionFailure(err: unknown): { status: number; error: string 
   if (category === "DRIVE_NETWORK_ERROR") {
     return { status: 502, error: "Could not reach file storage. Please check your connection and try again." };
   }
-  return { status: 502, error: "Could not start the upload. Please try again." };
+  if (category === "DRIVE_FILE_NOT_FOUND") {
+    return { status: 404, error: "The storage folder was not found. Please ensure the authorized Google account has Editor access to the application's root Drive folder." };
+  }
+  const info = classifyDriveError(err) !== "DRIVE_DOWNLOAD_FAILED" ? err : err; // Keep type simple
+  const safeDetail = sanitizeDriveError(err).message || sanitizeDriveError(err).reason || (err instanceof Error ? err.message : String(err));
+  return { status: 502, error: `Could not start the upload. Please try again. (Details: ${safeDetail})` };
 }
 
 export async function POST(request: NextRequest) {
@@ -210,7 +216,8 @@ export async function POST(request: NextRequest) {
       replaceFileId,
     });
   } catch (err) {
-    console.error("[api/files/upload/session] stage=unexpected", err instanceof Error ? err.message : err);
-    return NextResponse.json({ error: "Could not start the upload. Please try again." }, { status: 500 });
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error("[api/files/upload/session] stage=unexpected", detail);
+    return NextResponse.json({ error: `Could not start the upload. Please try again. (Details: ${detail})` }, { status: 500 });
   }
 }
