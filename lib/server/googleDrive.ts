@@ -246,7 +246,7 @@ function rootFolderId(): string {
     console.error("[googleDrive] stage=not_configured missing: GOOGLE_DRIVE_ROOT_FOLDER_ID");
     throw new Error("Google Drive is not configured on the server.");
   }
-  return id;
+  return id.trim();
 }
 
 function escapeQueryValue(value: string): string {
