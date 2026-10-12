@@ -51,7 +51,13 @@ function sanitizedSessionFailure(err: unknown): { status: number; error: string 
     return { status: 502, error: "Could not reach file storage. Please check your connection and try again." };
   }
   if (category === "DRIVE_FILE_NOT_FOUND") {
-    return { status: 404, error: "The storage folder was not found. Please ensure the authorized Google account has Editor access to the application's root Drive folder." };
+    const customMessage = err instanceof Error ? err.message : "";
+    return {
+      status: 404,
+      error:
+        customMessage ||
+        "The storage folder was not found. Please ensure the authorized Google account has Editor access to the application's root Drive folder.",
+    };
   }
   const info = classifyDriveError(err) !== "DRIVE_DOWNLOAD_FAILED" ? err : err; // Keep type simple
   const safeDetail = sanitizeDriveError(err).message || sanitizeDriveError(err).reason || (err instanceof Error ? err.message : String(err));

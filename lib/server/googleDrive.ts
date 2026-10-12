@@ -241,12 +241,15 @@ async function withDriveAuth<T>(operation: (drive: drive_v3.Drive) => Promise<T>
 }
 
 function rootFolderId(): string {
-  const id = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID;
-  if (!id) {
+  const raw = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID;
+  if (!raw) {
     console.error("[googleDrive] stage=not_configured missing: GOOGLE_DRIVE_ROOT_FOLDER_ID");
     throw new Error("Google Drive is not configured on the server.");
   }
-  return id.trim();
+  const trimmed = raw.trim();
+  const urlMatch = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (urlMatch) return urlMatch[1];
+  return trimmed;
 }
 
 function escapeQueryValue(value: string): string {
@@ -323,12 +326,19 @@ export async function resolveFolderPath(segments: string[]): Promise<string> {
     } catch (err) {
       const info = sanitizeDriveError(err);
       if (info.code === 404) {
+        let authEmail = "unknown";
+        try {
+          const about = await drive.about.get({ fields: "user" });
+          authEmail = about.data.user?.emailAddress || "unknown";
+        } catch {}
         console.error(
-          "[googleDrive] stage=root_folder_get_failed reason=not_visible",
-          info,
-          "— either re-run /api/auth/google signed into the account that owns the folder,",
-          "or share the folder (Editor) with the account that was used to authorize."
+          `[googleDrive] stage=root_folder_get_failed reason=not_visible account=${authEmail} folderId=${rootId}`
         );
+        const folderErr = new Error(
+          `The root Drive folder (ID: "${rootId}") was not found for authorized account "${authEmail}". Please share folder "${rootId}" with "${authEmail}" (Editor) in Google Drive.`
+        );
+        (folderErr as unknown as { code: number }).code = 404;
+        throw folderErr;
       } else {
         console.error("[googleDrive] stage=root_folder_get_failed", info);
       }
