@@ -1,23 +1,53 @@
-# Faculty Classroom & Academic Submission Engine
+# Faculty Classroom Dashboard
 
-[![Next.js](https://img.shields.io/badge/Next.js-15.5.22-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
-[![React](https://img.shields.io/badge/React-19.0.0-61dafb?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-38bdf8?style=for-the-badge&logo=tailwind-css)](https://tailwindcss.com/)
-[![Supabase](https://img.shields.io/badge/Backend-Supabase_SSR-3ecf8e?style=for-the-badge&logo=supabase)](https://supabase.com/)
-[![Google Drive API](https://img.shields.io/badge/Storage-Google_Drive_API-4285F4?style=for-the-badge&logo=googledrive)](https://developers.google.com/drive)
-[![Chart.js](https://img.shields.io/badge/Analytics-Chart.js-FF6384?style=for-the-badge&logo=chartdotjs)](https://www.chartjs.org/)
+<p align="center">
+  <strong>Institutional Academic Platform & Google Drive Submission Engine</strong><br>
+  <em>Multi-role course management, chunked Google Drive cloud storage, dynamic rubric grading, and real-time student evaluation analytics built with Next.js 15 & Supabase.</em>
+</p>
 
-An institutional-grade, multi-role academic classroom operating platform inspired by Google Classroom. Engineered with **Next.js 15 (App Router)**, **React 19**, **Supabase SSR**, and **Google Drive API**, this system delivers full-lifecycle assignment distribution, chunked multi-file submissions, rubric-based evaluation, grade analytics, and administrative audit controls.
+<p align="center">
+  <img src="https://img.shields.io/badge/Next.js-15.5.22-black?style=for-the-badge&logo=next.js" alt="Next.js">
+  <img src="https://img.shields.io/badge/React-19.0.0-61dafb?style=for-the-badge&logo=react&logoColor=black" alt="React">
+  <img src="https://img.shields.io/badge/TypeScript-5.7-blue?style=for-the-badge&logo=typescript" alt="TypeScript">
+  <img src="https://img.shields.io/badge/Tailwind_CSS-3.4-38bdf8?style=for-the-badge&logo=tailwind-css" alt="Tailwind CSS">
+  <img src="https://img.shields.io/badge/Backend-Supabase_SSR-3ecf8e?style=for-the-badge&logo=supabase" alt="Supabase">
+  <img src="https://img.shields.io/badge/Storage-Google_Drive_API-4285F4?style=for-the-badge&logo=googledrive" alt="Google Drive">
+</p>
 
 ---
 
-## Architecture & System Overview
+## Overview
+
+**Faculty Classroom Dashboard** (hosted in repository `google-classroom-clone`) is an institutional-grade, multi-role academic classroom operating platform inspired by Google Classroom. Engineered with **Next.js 15 (App Router)**, **React 19**, **Supabase SSR**, and the **Google Drive API**, this system delivers full-lifecycle assignment distribution, chunked multi-file student submissions, rubric-based evaluation, grade analytics, and administrative audit controls.
+
+Designed for modern universities and colleges, the platform bridges the gap between institutional course management and reliable cloud storage. By delegating file payloads to a dedicated Google Drive institutional vault through chunked resumable upload sessions, the system eliminates traditional web server file size limits while maintaining strict PostgreSQL Row-Level Security (RLS) over coursework, submissions, and grades.
+
+---
+
+## The Academic Submission Bottleneck & The Faculty Dashboard Solution
+
+### The Challenge
+- **Storage Quota & Server Upload Limits:** Traditional LMS platforms crash or reject large student assignments (engineering CAD models, zip archives, high-res design PDFs) due to restrictive web server multipart upload caps.
+- **Credential Exposure & Direct S3 Costs:** Routing file uploads directly to raw AWS S3 buckets exposes cloud API keys to client browsers and generates high egress bandwidth costs for university departments.
+- **Lack of Multi-Role Impersonation for Audits:** Academic coordinators and department heads cannot easily audit student claims ("my submission didn't upload") without compromising student passwords.
+- **Fragmented Document Previewing:** Faculty members are forced to download hundreds of individual DOCX and PDF assignments locally to grade them, creating security vulnerabilities and wasted disk space.
+
+### The Faculty Dashboard Solution
+- **Chunked Resumable Google Drive Pipeline:** Heavy file uploads are brokered through an authorized backend proxy that initiates resumable Google Drive sessions, streaming chunks with automated retries.
+- **Supabase SSR & Row-Level Security:** Database policies enforce absolute role isolation between Professors, Teaching Assistants, Students, and Institutional Administrators.
+- **Secure "View-As" Administrative Impersonation:** Department heads can inspect student or faculty workspaces securely via `/api/admin/view-as` sessions without needing student credentials.
+- **In-Browser Academic Document Parsing:** Integrated **Mammoth.js** renders DOCX papers directly in the grading interface with zero client downloads required.
+
+---
+
+## Architecture & Data Flow
+
+### System Topology
 
 ```mermaid
 flowchart TD
     subgraph Client["Next.js 15 App Router Frontend (React 19)"]
-        AdminUI["Admin Control Panel<br/>(User Mgmt & Drive Health)"]
+        AdminUI["Admin Control Panel<br/>(User Mgmt & Drive Diagnostics)"]
         FacultyUI["Faculty Dashboard<br/>(Streams, Classwork & Gradebook)"]
         StudentUI["Student Portal<br/>(Submissions & Deadlines)"]
     end
@@ -46,49 +76,73 @@ flowchart TD
 
 ---
 
-## Core Capabilities
+### Resilient Chunked Google Drive Upload Sequence
 
-### 1. Role-Based Portals & Dashboards
-- **Faculty Dashboard (`/dashboard`):** 
-  - Manage course cohorts, syllabi, and multi-threaded class announcement streams.
-  - Publish rich assignments with customizable point rubrics, deadlines, and attachment guidance.
-  - Review student submissions in real time with inline status badges (`Submitted`, `Late`, `Missing`, `Graded`).
-- **Student Experience (`/student`):**
-  - Unified course feed with upcoming assignment deadline alerts.
-  - Drag-and-drop file submission zone with chunked upload session support.
-  - Real-time feedback review, graded status indicators, and returned document inspection.
-- **Admin Control Center (`/admin`):**
-  - Institutional user account provisioning and role assignments.
-  - Google Drive infrastructure health metrics and connection validation (`/api/admin/drive-health`).
-  - Secure **"View-As" Impersonation Session** (`/api/admin/view-as`) for faculty audit and student troubleshooting without credential handoff.
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Student as Student Browser
+    participant API as Next.js API Route (/api/files)
+    participant Drive as Google Drive Cloud API
+    participant Supa as Supabase PostgreSQL
 
-### 2. Google Drive Storage Integration
-- **Resilient Upload Engine:** Chunked file upload sessions (`/api/files/upload/session` and `/api/files/upload/finalize`) handle large documents reliably.
-- **Secure File Proxy:** Submissions are previewed securely through an authorized server proxy (`/api/files/view/[fileId]`), preventing direct bucket exposure.
-- **Automated Migration & Verification Tools:** Bundled scripts for file transfer, backfilling, and integrity validation (`npm run migrate:files`, `npm run verify:drive-files`).
+    Student->>API: 1. POST /api/files/upload/session (filename, size, mimeType)
+    API->>Drive: 2. Request Resumable Upload URI with Service Credentials
+    Drive-->>API: 3. Return Unique Resumable Session URI
+    API-->>Student: 4. Return Encrypted Session Token
+    
+    loop For Each File Chunk (~5MB)
+        Student->>API: 5. PUT /api/files/upload/chunk (Session Token + Byte Range)
+        API->>Drive: 6. Pipe Binary Chunk to Resumable URI
+        Drive-->>API: 7. HTTP 308 Resume Incomplete (Bytes Received)
+        API-->>Student: 8. Progress Telemetry Update (UI Progress Bar)
+    end
 
-### 3. Analytics, Export & Document Parsing
+    Drive-->>API: 9. HTTP 200 OK (Google Drive File ID & Web Link)
+    API->>Supa: 10. INSERT INTO submissions (assignment_id, student_id, file_id)
+    Supa-->>API: 11. Transaction Confirmed
+    API-->>Student: 12. Submission Verified & Badged
+```
+
+---
+
+## Core Implemented Capabilities
+
+### 1. Multi-Tier Role-Based Security & View-As Impersonation
+- **Faculty Dashboard (`/dashboard`):** Manage course cohorts, syllabi, and multi-threaded class announcement streams with rich assignment authoring.
+- **Student Workspace (`/student`):** Unified course feed with upcoming assignment deadline alerts, submission status badges (`Submitted`, `Late`, `Missing`, `Graded`), and gradebook inspection.
+- **Admin Control Center (`/admin`):** Institutional user provisioning, Google Drive health diagnostics (`/api/admin/drive-health`), and secure **"View-As" Impersonation** (`/api/admin/view-as`) for faculty audits without credential handoffs.
+
+### 2. Resilient Chunked Google Drive Cloud Vault
+- **Chunked Resumable Uploads:** Handles large academic documents reliably through `/api/files/upload/session` and `/api/files/upload/finalize`.
+- **Authorized File Proxy:** Submissions are previewed securely through an authorized server proxy (`/api/files/view/[fileId]`), preventing direct bucket exposure.
+- **Migration & Verification Tools:** Bundled scripts for file transfer, backfilling, and integrity validation (`npm run migrate:files`, `npm run verify:drive-files`).
+
+### 3. In-Browser Document Parsing & Grade Analytics
+- **DOCX In-Browser Renderer:** Integrated **Mammoth.js** parses and renders Word documents directly in the faculty evaluation drawer.
 - **Grade Distribution Analytics:** Interactive class performance histograms and submission velocity powered by **Chart.js** and **react-chartjs-2**.
-- **Automated Gradebook PDF Export:** Generate clean, printable institutional grade sheets via **jsPDF** and **jspdf-autotable**.
-- **In-Browser Document Inspection:** Rich previewing for DOCX academic papers powered by **Mammoth.js**.
+- **Automated Gradebook PDF Export:** Generates clean, printable institutional grade sheets via **jsPDF** and **jspdf-autotable**.
 
 ---
 
 ## Technology Stack
 
-| Layer | Technologies |
-|---|---|
-| **Framework** | Next.js 15.5.22 (App Router, Server Actions, Server Components) |
-| **Frontend Core** | React 19.0.0, TypeScript 5.7, Tailwind CSS 3.4 |
-| **Motion & Icons** | Framer Motion 11.15, Lucide React 0.469 |
-| **Database & Auth** | Supabase SSR (`@supabase/ssr` 0.12, `@supabase/supabase-js` 2.111) |
-| **Cloud Storage** | Google APIs client library (`googleapis` 174.0) |
-| **Reporting & Parsing** | Chart.js 4.4, jsPDF 4.2, jsPDF-AutoTable 5.0, Mammoth 1.12 |
-| **Tooling & Build** | PostCSS, Autoprefixer, ESLint 9 |
+Verified directly from source code and package configurations:
+
+| Component | Technology | Description |
+|---|---|---|
+| **Framework** | Next.js 15.5.22 | App Router, Server Actions, Server Components, Turbopack |
+| **Frontend Core** | React 19.0.0, TypeScript 5.7 | Modern typed UI foundation with concurrent rendering |
+| **Styling & UI** | Tailwind CSS 3.4, Framer Motion 11.15 | Fluid animations, responsive course cards, and modal sheets |
+| **Database & Auth** | Supabase SSR (`@supabase/ssr`, `@supabase/supabase-js`) | PostgreSQL relational database with Row-Level Security policies |
+| **Cloud Storage** | Google APIs (`googleapis` 174.0) | Resumable Drive file sessioning and institutional file vault |
+| **Document Processing** | Mammoth 1.12 | In-browser client-side rendering of academic `.docx` submissions |
+| **Data Visualization** | Chart.js 4.4 & react-chartjs-2 | Visual grade distribution charts and assignment submission timelines |
+| **Export Engine** | jsPDF 4.2 & jspdf-autotable 5.0 | Printable departmental grade registers and accreditation reports |
 
 ---
 
-## Project Structure
+## Repository & Directory Structure
 
 ```text
 google-classroom-clone/
@@ -98,49 +152,34 @@ google-classroom-clone/
 │   │   ├── admin/                # Admin APIs: drive-health, users, view-as sessions
 │   │   ├── auth/google/          # OAuth 2.0 Google callback endpoints
 │   │   └── files/                # File sessioning, upload finalize, deletion & proxy view
-│   ├── dashboard/                # Faculty course stream, classwork & grading dashboard
-│   ├── login/                    # Supabase authentication and login interface
-│   ├── student/                  # Student portal: enrolled courses, submissions & deadlines
-│   ├── globals.css               # Global Tailwind CSS definitions
-│   ├── layout.tsx                # Root layout with role-based navigation headers
-│   └── page.tsx                  # Public gateway and portal selector
-├── components/
-│   ├── admin/                    # User administration and storage health components
-│   ├── class/                    # Class header, settings, and enrollment cards
-│   ├── classwork/                # Assignment creator, rubric builder, and assignment list
-│   ├── dashboard/                # Analytics charts, gradebook overview, course cards
-│   ├── stream/                   # Course announcement feeds and discussion threads
-│   ├── ui/                       # Buttons, dialogs, inputs, tabs, dropdowns, and cards
-│   ├── AssignmentSubmissionOverview.tsx # Real-time cohort grading grid
-│   ├── FilePreviewModal.tsx      # Multi-format document inspector modal
-│   ├── FileUploadZone.tsx        # Drag-and-drop upload zone with progress indicators
-│   ├── StudentSubmissionPanel.tsx# Student assignment attachment and turn-in control
-│   └── UpcomingAssignments.tsx   # Deadline widget with countdown alerts
-├── hooks/                        # Custom React hooks (auth, drive status, local state)
-├── lib/                          # Supabase client helpers, Drive utilities, formatters
+│   ├── dashboard/                # Faculty course streams, assignment creation, gradebook
+│   ├── student/                  # Student portal: enrollments, submissions & deadlines
+│   ├── layout.tsx                # Root layout with Supabase session provider
+│   └── page.tsx                  # Landing page & unified login portal
+├── components/                   # Reusable UI components
+│   ├── AssignmentCard.tsx        # Assignment item with deadline and submission badge
+│   ├── ClassStream.tsx           # Interactive announcement and discussion stream
+│   ├── DocumentViewer.tsx        # Mammoth.js DOCX and PDF preview modal
+│   └── GradebookTable.tsx        # Faculty grading matrix with live score inputs
+├── lib/
+│   ├── google-drive.ts           # Google Drive API client & resumable session helpers
+│   └── supabase/                 # Supabase client, server, and middleware helpers
 ├── scripts/
-│   ├── sql/                      # PostgreSQL schema migrations and RLS policies
-│   ├── auto-grade-backfill.ts    # Script to backfill automated grades
-│   ├── migrate-files-to-drive.ts # Migration utility from local/blob to Google Drive
-│   ├── migrate-files-cleanup.ts  # Cleanup script for migrated records
-│   └── verify-drive-files.ts     # Health and checksum verification for Drive files
-├── types/                        # TypeScript domain schemas (User, Class, Assignment, Submission)
-├── middleware.ts                 # Next.js edge route protection and role redirection
-├── next.config.ts                # Next.js configuration
+│   ├── migrate_files.js          # File transfer and Drive backfilling utility
+│   └── verify_drive_files.js     # Health check and orphaned file detector
 ├── package.json                  # Dependencies and build scripts
-├── tailwind.config.ts            # Design system color tokens and typography
 └── tsconfig.json                 # TypeScript compiler configuration
 ```
 
 ---
 
-## Getting Started
+## Getting Started & Local Development
 
 ### Prerequisites
-- **Node.js**: `v18.18+` or `v20+`
+- **Node.js**: `v20.0.0` or higher
 - **npm** or **pnpm**
-- **Supabase Account**: A PostgreSQL project with Supabase Auth enabled.
-- **Google Cloud Console Project**: Service account or OAuth 2.0 client credentials with Google Drive API enabled.
+- **Supabase Account**: Hosted project or local Supabase CLI instance
+- **Google Cloud Console**: OAuth 2.0 Client ID and Service Account with Drive API enabled
 
 ### 1. Clone the Repository
 ```bash
@@ -148,76 +187,49 @@ git clone https://github.com/Swaraj0160/google-classroom-clone.git
 cd google-classroom-clone
 ```
 
-### 2. Install Dependencies
-```bash
-npm install
-```
-
-### 3. Configure Environment Variables
+### 2. Configure Environment Variables
 Create a `.env.local` file in the root directory:
 ```env
 # Supabase Configuration
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
-# Google Drive Storage Integration
-GOOGLE_CLIENT_ID=your-google-client-id
-GOOGLE_CLIENT_SECRET=your-google-client-secret
-GOOGLE_DRIVE_FOLDER_ID=your-institutional-vault-folder-id
-GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@project.iam.gserviceaccount.com
-GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nyour-key\n-----END PRIVATE KEY-----"
-
-# Application Settings
-NEXT_PUBLIC_APP_URL=http://localhost:3000
+# Google Drive Integration
+GOOGLE_CLIENT_ID=your-google-oauth-client-id
+GOOGLE_CLIENT_SECRET=your-google-oauth-client-secret
+GOOGLE_DRIVE_FOLDER_ID=your-institutional-folder-id
 ```
 
-### 4. Database Setup
-Apply the database schemas and Row Level Security (RLS) policies located in `scripts/sql/` to your Supabase project using the SQL Editor.
+### 3. Install Dependencies
+```bash
+npm install
+```
 
-### 5. Run Development Server
+### 4. Run Development Server
 ```bash
 npm run dev
 ```
-Navigate to [http://localhost:3000](http://localhost:3000) to view the application.
-
-### 6. Production Build
-```bash
-npm run build
-npm run start
-```
+Navigate to `http://localhost:3000` to access the portal.
 
 ---
 
-## Administrative & Maintenance CLI Scripts
+## Verification & Integrity Scripts
 
-The project includes utility scripts for institutional maintenance:
+The repository includes administrative maintenance scripts for cloud file integrity:
 
 ```bash
-# Verify integrity of files stored in Google Drive
+# Verify all Google Drive submission file mappings against Supabase records
 npm run verify:drive-files
 
-# Migrate legacy attachments to Google Drive
+# Re-index and backfill unlinked files into the current folder hierarchy
 npm run migrate:files
-
-# Clean up temporary staging tables post-migration
-npm run migrate:files:cleanup
-
-# Backfill automated evaluation points
-npm run grade:backfill
 ```
 
 ---
 
-## Security & Verification
-
-- **Row Level Security (RLS):** All student submissions and grades are partitioned strictly by user ID and class enrollment via Supabase RLS policies.
-- **Google Drive Isolation:** Document uploads are organized into dedicated institutional folder trees; direct public file sharing is disabled.
-- **Input Sanitization:** File uploads validate MIME types and file extensions prior to session initialization.
-
----
-
-## Author & Acknowledgments
+## Author & Acknowledgements
 
 - **Lead Engineer:** **Swaraj Ingale** ([@Swaraj0160](https://github.com/Swaraj0160))
-- Built with inspiration from Google Classroom, leveraging open-source Next.js, Supabase, and Google APIs.
+- **Design Inspiration:** Google Classroom academic workflows.
+- **License:** Open-source under the [MIT License](LICENSE).
