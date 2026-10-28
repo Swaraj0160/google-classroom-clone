@@ -155,7 +155,6 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
             .select("id, title, total_marks, due_date, created_at")
             .eq("course_id", courseId)
             .in("type", ["assignment", "quiz"])
-            .not("total_marks", "is", null)
             .order("created_at", { ascending: true }),
         ]);
 
@@ -418,7 +417,7 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
           <h2 className="text-lg font-semibold text-ink dark:text-white">Gradebook</h2>
           <p className="text-xs text-ink-faint">
             {assignments.length === 0
-              ? "No assignments with marks yet."
+              ? "No assignments yet."
               : `${assignments.length} assignment${assignments.length === 1 ? "" : "s"} · ${students.length} student${students.length === 1 ? "" : "s"}`}
           </p>
         </div>
@@ -459,7 +458,7 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
       {assignments.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-black/10 bg-white py-20 text-center dark:border-white/10 dark:bg-surface-darkAlt">
           <p className="text-sm font-medium text-ink-faint">
-            Create an assignment or quiz with total marks to start tracking marks here.
+            Create an assignment or quiz to start tracking marks here.
           </p>
         </div>
       ) : (
@@ -534,7 +533,9 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
                           <p className="line-clamp-2 text-[11px] font-semibold uppercase tracking-wide text-ink dark:text-white">
                             {a.title}
                           </p>
-                          <p className="text-[10px] font-normal text-ink-faint">/{a.total_marks}</p>
+                          <p className="text-[10px] font-normal text-ink-faint">
+                            {a.total_marks !== null ? `/${a.total_marks}` : "—"}
+                          </p>
                         </th>
                       ))}
                       <th className="sticky top-0 z-10 min-w-[80px] bg-surface-alt/60 px-4 py-3 text-center dark:bg-[#1c2333]">
@@ -570,7 +571,7 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
                               cell.kind === "graded" ? (
                                 <div>
                                   <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-brand-green dark:bg-green-500/10">
-                                    {cell.marks}/{cell.maxMarks}
+                                    {cell.marks}{cell.maxMarks !== null ? `/${cell.maxMarks}` : ""}
                                   </span>
                                   {cell.suggestedMarks === null && (
                                     <p className="mt-1 text-[10px] text-ink-faint">Auto graded</p>
@@ -618,7 +619,9 @@ export default function MarksTab({ courseId, courseName }: MarksTabProps) {
                       <td className="sticky left-[180px] z-10 bg-surface-alt/40 px-4 py-3 dark:bg-[#1c2333]" />
                       {visibleAssignments.map((a, i) => (
                         <td key={a.id} className="px-3 py-3 text-center text-xs font-semibold text-ink dark:text-white">
-                          {assignmentAverage[i] !== null ? `${assignmentAverage[i]!.toFixed(1)}/${a.total_marks}` : "—"}
+                          {assignmentAverage[i] !== null
+                            ? `${assignmentAverage[i]!.toFixed(1)}${a.total_marks !== null ? `/${a.total_marks}` : ""}`
+                            : "—"}
                         </td>
                       ))}
                       <td className="px-4 py-3" />
